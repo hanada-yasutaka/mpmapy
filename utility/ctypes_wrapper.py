@@ -1,5 +1,6 @@
 import ctypes
 import os
+import numpy
 
 class qEispack(object):
 	def __init__(self):
@@ -39,7 +40,6 @@ class call_hsm_rep(object):
 		self.c_lib = ctypes.cdll.LoadLibrary(file_path)
 		
 	def husimi_rep(self, vec, dim, domain, hsm_range, hsm_grid):
-		import numpy
 		terget = numpy.array(vec,dtype=numpy.complex128)
 		qmin, qmax = domain[0][0], domain[0][1]
 		pmin, pmax = domain[1][0], domain[1][1]
@@ -49,9 +49,9 @@ class call_hsm_rep(object):
 		vpmin, vpmax = hsm_range[1][0], hsm_range[1][1]
 		row, col = hsm_grid[0], hsm_grid[1]
 		hsm_data = numpy.zeros([row, col], dtype=numpy.float64)
-		 
-		rvec = terget.real
-		ivec = terget.imag
+		
+		rvec = numpy.copy(vec.real)
+		ivec = numpy.copy(vec.imag)
 		
 		f4ptr = ctypes.POINTER(ctypes.c_double)
 		data = (f4ptr*row)(*[ROW.ctypes.data_as(f4ptr) for ROW in hsm_data])
@@ -79,8 +79,8 @@ class call_hsm_rep(object):
             )
 		hsm_data=numpy.array([data[i][j] for i in range(row) for j in range(col)])
 		hsm_imag = hsm_data.reshape(row,col)
-		x = numpy.linspace(vqmin, vqmax, dim)
-		y = numpy.linspace(vpmin, vpmax, dim)
-		X,Y = numpy.meshgrid(x,y)
+#		x = numpy.linspace(vqmin, vqmax, row)
+#		y = numpy.linspace(vpmin, vpmax, col)
+#		X,Y = numpy.meshgrid(x,y)
 
-		return X,Y,hsm_imag
+		return hsm_imag

@@ -52,6 +52,8 @@ def multi_hsm(hsm_region, grid, core, verbose=False):
     iter_max = int(data_num/core)
     k = 0
     for j in range(iter_max):
+        if verbose:
+            print(files[j],"->",files[j].replace("qrep","hsm"))
         #title="eigen_hsm_%d.dat" % j
         p = [Process(target=qrep2hsm.qrep2hsm, args=(files[i+k],hsm_region,grid)) for i in range(core)]
         [p[i].start() for i in range(core)]
