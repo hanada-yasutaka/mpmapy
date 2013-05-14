@@ -1,8 +1,13 @@
-from HilbertSpace import *
+from mpArray import *
+import mpmath
 import mpfft
-import numpy
-import multiprocessing
 twopi = mpmath.mpf("2")*mpmath.pi
+
+class HilbertSpace(object):
+    def __init__(self, dim):
+        if not isinstance(dim, int):
+            raise ValueError('excepted integer')
+        self.dim = dim
 
 class ScaleInfo(HilbertSpace):
     def __init__(self, dim):
@@ -15,7 +20,7 @@ class ScaleInfo(HilbertSpace):
         if not isinstance(qmax,int) and not isinstance(qmax, mpmath.mpf):
             raise ValueError('input values have to be an integer or an mpmath.mpf value')
         if qmin >= qmax:
-            raise ValueError('Error: qmin >= qmax')
+            raise ValueError('Error: qmin >= qmax ')
         self.domain[0][0] = mpmath.mpf(qmin)
         self.domain[0][1] = mpmath.mpf(qmax)
     
@@ -46,44 +51,47 @@ class ScaleInfo(HilbertSpace):
     def getPlanck(self):
         return self.getVolume()/self.dim
 
-class State(Vector):
-    def __init__(self, dim, scaleinfo, data=None):
-        if not isinstance(scaleinfo, ScaleInfo):
-            raise TypeError("scaleinfo must an instance with ScaleInfo")
-        if data == None:
-            Vector.__init__(self,input=dim)
-        elif dim != len(data):
-            raise ValueError("data length dose not much dim")
+class State(mpArray):
+    def __new__(cls, scaleinfo, data=None):
+        if data != None and isinstance(data, mpArray):
+            obj = numpy.asarray(data, dtype='object').view(cls)
+        elif isinstance(scaleinfo, ScaleInfo):
+            data = [mpmath.mpc('0','0')]*scaleinfo.dim
+            obj = numpy.asarray(data, dtype='object').view(cls)
         else:
-            Vector.__init__(self, input=data)
+            raise TypeError("usage: scaleinfo, (optional) mpArray")
+        if len(obj) != scaleinfo.dim:
+            raise ValueError("data length does not match")            
+        obj.scaleinfo = scaleinfo
+        obj.dim = scaleinfo.dim
+        return obj
+    def __array_finalize__(self, obj):
+        if obj is None: return
+        self.scaleinfo = getattr(obj, 'scaleinfo',None)
+        self.dim = getattr(obj, 'dim', None)
         
-        self.scaleinfo = scaleinfo
-        
+    def qrep(self):
+        return self
+    
+    def prep(self):
+        pass
+    
+    def parity(self):
+        vec = [x for x in self]
+        vec.append(self[0])
+        arr = mpArray(vec)
+        return arr.inner(arr[::-1]).real 
+    
     def set_qconst(self, q_c):
+        self = State(self.scaleinfo)
         q = self.scaleinfo.x[0]
         dx = mpmath.fabs(q[1] - q[0])
         qmin = self.scaleinfo.domain[0][0]
         qmax = self.scaleinfo.domain[0][1]
         index = int(round((q_c - qmin)/dx))
         if index > self.dim - 1 or index < 0:
-            raise ValueError('q_c set in (%s,%s) with %s' %\
-             (mpmath.nstr(qmin), mpmath.nstr(qmax), mpmath.nstr(dx)) )
-        self.data[index] = mpmath.mpc(1, 0)
-        
-    def set_pconst(self, p_c):
-        pass
-    
-    def set_cs(self,p_c):
-        pass
-    
-    def set_linear(self):
-        pass
-        
-    def qrep(self):
-        return self.data
-    
-    def prep(self):
-        pass
+            raise ValueError('q_c set in (%s,%s) with %s' % (mpmath.nstr(qmin), mpmath.nstr(qmax), mpmath.nstr(dx)) )
+        self[index] = mpmath.mpc("1", "0")
     
     def hsmrep(self, col, row, hsm_region=None):
         if hsm_region==None:
@@ -92,8 +100,11 @@ class State(Vector):
             self._hsm_region = hsm_region 
         from utility import ctypes_wrapper
         cw = ctypes_wrapper.call_hsm_rep()
-        X,Y, hsm_imag = cw.husimi_rep(self.data, self.dim, self.scaleinfo.domain, self._hsm_region, [row,col])        
-        return X, Y, hsm_imag
+        hsm_imag = cw.husimi_rep(self, self.dim, self.scaleinfo.domain, self._hsm_region, [row,col])
+        x = numpy.linspace(self._hsm_region[0][0], self._hsm_region[0][1], row)
+        y = numpy.linspace(self._hsm_region[1][0], self._hsm_region[1][1], col)
+        X,Y = numpy.meshgrid(x,y)       
+        return X,Y,hsm_imag
     
     def _mult_save_hsmrep(self, **kwargs):
         col = kwargs['col']
@@ -121,42 +132,39 @@ class State(Vector):
             of.write("# ROW %d\n# COL %d\n" % (row, col))
             for slice_data in hsm_imag.transpose():
                 numpy.savetxt(of, slice_data)
-            of.write("\n")        
+            of.write("\n") 
 
 
 class Qmap(HilbertSpace):
     def __init__(self,dim):
         HilbertSpace.__init__(self, dim)
         self.scaleinfo = ScaleInfo(dim)
-        self.stateIn = Vector(dim)
-        self.stateOut = Vector(dim)
+        self.stateIn = mpArray(dim)
+        self.stateOut = mpArray(dim)
         
     def setIn(self, state):
-        if len(state) != self.dim and not isinstance(state, Vector):
-            raise ValueError("expected State or Vector (dim=%d) instance" % self.dim)
+        if len(state) != self.dim:
+            if not isinstance(state, mpArray) or not isinstance(state, State):
+                raise ValueError("expected State or mpArray or State (dim=%d) instance" % self.dim)
         self.stateIn = state
 
-
     def getIn(self):
-        return State(self.dim, self.scaleinfo, self.stateIn)
+        return State(self.scaleinfo, self.stateIn)
     
     def getOut(self):
-        return State(self.dim, self.scaleinfo, self.stateOut)
+        return State(self.scaleinfo, self.stateOut)
 
     def swap(self):
-        tmp = self.stateIn.data #[self.stateIn.data[i] for i in range(self.dim)]
-        self.stateIn  = self.stateOut
-        self.stateOut = Vector(tmp)
+        tmp =self.stateIn.copy() #[self.stateIn.data[i] for i in range(self.dim)]
+        self.stateIn  = self.stateOut.copy()
+        self.stateOut = tmp
 
     def pull(self):
-        self.stateIn = Vector(self.stateOut)
+        self.stateIn = mpArray(self.stateOut)
 
     def operate(self):
         pass
     
-    def absorbed_operate(self):
-        pass
-
     def map(self, state):
         self.setIn(state)
         self.operate()
@@ -172,10 +180,11 @@ class Unitary(Qmap):
         self.map = map
         if not isinstance(tau, mpmath.mpf) and  not isinstance(tau, int):
             raise TypeError("tau types must be mpmath.mpf or mpmath.mpc")
+    
         self.tau = tau
         self.matrix = None
-        self.evals = None
-        self.evecs = None
+        #self.evals = None
+        #self.evecs = None
         
     def setDomain(self, r):
         self.scaleinfo.setDomain(r)
@@ -185,67 +194,69 @@ class Unitary(Qmap):
         if isShift:
             sub_x = numpy.fft.fftshift(x)
             func = self.map.ifunc0(sub_x)
-            self.operator[0] = Vector([ mpmath.exp(mpmath.mpc("0", -twopi*func[i]*self.tau/self.h)) for i in range(self.dim) ])
+            self.operator[0] = mpArray([ mpmath.exp(mpmath.mpc("0", -twopi*func[i]*self.tau/self.h)) for i in range(self.dim) ])
         else:
             func = self.map.ifunc0(x)
-            self.operator[0] = Vector([ mpmath.exp(mpmath.mpc("0", -twopi*func[i]*self.tau/self.h)) for i in range(self.dim) ])
+            self.operator[0] = mpArray([ mpmath.exp(mpmath.mpc("0", -twopi*func[i]*self.tau/self.h)) for i in range(self.dim) ])
 
     def op1(self, x, isShift=True):
         if isShift:
             sub_x = numpy.fft.fftshift(x)
             func = self.map.ifunc1(sub_x)
-            self.operator[1] = Vector([ mpmath.exp(mpmath.mpc("0", -twopi*func[i]*self.tau/self.h)) for i in range(self.dim) ])
+            self.operator[1] = mpArray([ mpmath.exp(mpmath.mpc("0", -twopi*func[i]*self.tau/self.h)) for i in range(self.dim) ])
         else:
             func = self.map.ifunc1(x)
-            self.operator[1] = Vector([ mpmath.exp(mpmath.mpc("0", -twopi*func[i]*self.tau/self.h)) for i in range(self.dim) ])
+            self.operator[1] = mpArray([ mpmath.exp(mpmath.mpc("0", -twopi*func[i]*self.tau/self.h)) for i in range(self.dim) ])
         
     def operate(self, invec=None, queue=None, verbose=False):
         if invec != None:
-            if isinstance(invec, Vector):
+            if isinstance(invec, mpArray):
                 self.setIn(invec)
             elif isinstance(invec, list) and self.dim==len(invec):
-                self.setIn(Vector(invec))
+                self.setIn(mpArray(invec))
 
         qvec = self.operator[0]*self.stateIn
-        pvec = Vector(mpfft.fft(qvec.data, inverse=False, verbose=verbose))
-        pvec = self.operator[1]*pvec #[self.operator[1].data[i]*pvec[i] for i in range(self.dim)]
-        self.stateOut = Vector(mpfft.fft(pvec.data, inverse=True, verbose=verbose))
+        pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
+        pvec = self.operator[1]*pvec 
+        self.stateOut = mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
         if queue !=None: 
-            queue.put(self.stateOut.data)
+            queue.put(self.stateOut)
     
-
     def setOperator(self, fft=True):
-        self.operator = [Vector(self.dim) for i in range(2)] 
+        self.operator = [mpArray(self.dim) for i in range(2)] 
         
         self.op0(self.scaleinfo.x[0], False)
         self.op1(self.scaleinfo.x[1], self._isShift())        
 
     def setMatrix(self, fft=True, core=2, verbose=False):
-        from utility import parallel         
+        from utility import parallel
         self.setOperator(fft)
-        self.matrix = Matrix(self.dim)
+        matrix = mpMatrix(self.dim)
+        
 
-        orth_basis = [Vector(self.dim) for i in range(self.dim)]
+        orth_basis = [mpArray(self.dim) for i in range(self.dim)]
         
         for i in range(self.dim):
-            orth_basis[i].set(i, mpmath.mpc("1","0"))
+            orth_basis[i][i] = mpmath.mpc("1","0")
 
-        start = time.time()                            
-        if core > 1:        
-            data = [orth_basis[i].val() for i in range(self.dim)]            
-            multi = parallel.MultiProcessing(self.operate, data, core=core)
+        start = time.time()
+        
+        if core > 1:
+            #data = [orth_basis[i] for i in range(self.dim)]
+            multi = parallel.MultiProcessing(self.operate, orth_basis, core=core)
             multi.run()
             res = multi.getResults()
             for i in range(self.dim):
-                self.matrix.data[i,:] = mpmath.matrix(res[i]).T
-        elif core == 1:            
+                matrix[i,:] = res[i]
+        elif core == 1:
             for i in range(self.dim):
                 self.setIn(orth_basis[i])
                 self.operate()
-                self.matrix.data[i,:] = mpmath.matrix(self.stateOut.data).T
+                
+                matrix[i,:] = self.stateOut[:] #mpmath.matrix(self.stateOut.data).T
         t = time.time() -start
         
-        self.matrix.data = self.matrix.data.T
+        self.matrix = matrix.T
 
         if verbose :
             print("Making matrix of size" , self.dim, "in", t, "sec.", "using core", core)
@@ -253,51 +264,6 @@ class Unitary(Qmap):
     def getMatrix(self):
         return self.matrix        
         
-    def eigen(self, left=False, solver='qeispack', verbose=False):
-        try:
-            self.matrix.eigen(left=left, solver=solver, verbose=verbose)
-        except AttributeError:
-            self.setMatrix()
-            self.matrix.eigen(left=left, solver=solver, verbose=verbose)
-        self.evals, self.evecs = self.matrix.getEigen()
-        self.evecs = [State(self.dim, self.scaleinfo, evec) for evec in self.evecs]
-
-            
-    def saveEigen(self,verbose=False):
-        if self.evals ==None or self.evecs == None:
-            self.getEigen(verbose=verbose)
-        self._saveEvecs()
-    
-    def _saveEvals(self,title='eigen_vals.dat'):
-        pass
-    
-    def _saveEvecs(self):
-        for i, evec in enumerate(self.evecs):
-            f = open("eigen_qrep_%d.dat" % i, "w")
-            x = self.scaleinfo.x[0]
-            abs2 = evec.abs2()
-            self._annotate(f)
-            f.write("# q-representation eigenvector, %d-th\n" % i )            
-            f.write("# EIGENVALUE REAL %s\n" % self.evals.data[i].real)
-            f.write("# EIGENVALUE IMAG %s\n" % self.evals.data[i].imag)
-            f.write("# q, evec(q)*conj(evec(q)), Real[evec(q)], Imag[evec(q)]\n")            
-            [f.write("%s %s %s %s \n" % (x[j], abs2[j], evec.data[j].real, evec.data[j].imag)) for j in range(self.dim)]
-            f.close()
-
-    def _annotate(self, f):
-        import datetime
-        f.write("# DATE: %s\n" % datetime.datetime.now() )
-        f.write("# DIM %d\n" % self.dim )
-        f.write("# QMIN %s\n" % self.scaleinfo.domain[0][0])
-        f.write("# QMAX %s\n" % self.scaleinfo.domain[0][1])
-        f.write("# PMIN %s\n" % self.scaleinfo.domain[1][0])
-        f.write("# PMAX %s\n" % self.scaleinfo.domain[1][1])
-        
-
-    def _saveEigenHsm(self):
-        pass       
-            
-
     def _isShift(self, fft=True):
         if self.dim % 2 == 0 and self.scaleinfo.domain[1][0]*self.scaleinfo.domain[1][1] < 0:
             isShift = True
@@ -306,70 +272,149 @@ class Unitary(Qmap):
         if not fft:
             isShift = False
         return isShift
+    
+class SymetricUnitary(Unitary):
+    def __init__(self, map, dim, tau):
+        Unitary.__init__(self, map, dim, tau)
+
+    def op0(self, x, isShift=False):
+        if isShift:
+            sub_x = numpy.fft.fftshift(x)
+            func = self.map.ifunc0(sub_x)
+            self.operator[0] = mpArray([ mpmath.exp(mpmath.mpc("0", -twopi*func[i]*self.tau/self.h*mpmath.mpf("0.5"))) for i in range(self.dim) ])
+        else:
+            func = self.map.ifunc0(x)
+            self.operator[0] = mpArray([ mpmath.exp(mpmath.mpc("0", -twopi*func[i]*self.tau/self.h*mpmath.mpf("0.5"))) for i in range(self.dim) ])    
+
+    def operate(self, invec=None, queue=None, verbose=False):
+        if invec != None:
+            if isinstance(invec, mpArray):
+                self.setIn(invec)
+            elif isinstance(invec, list) and self.dim==len(invec):
+                self.setIn(mpArray(invec))
+
+        qvec = self.operator[0]*self.stateIn
+        pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
+        
+        
+        pvec = self.operator[1]*pvec #[self.operator[1].data[i]*pvec[i] for i in range(self.dim)]
+        qvec = mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
+        
+        qvec =self.operator[0]*qvec
+        pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
+        
+        self.stateOut = mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
+        
+        if queue !=None: 
+            queue.put(self.stateOut)
+
+class NonUnitary(Unitary):
+    pass
 
 
 class QmapSystem(object):
     def __init__(self, map, dim, type, domain, **kwargs):
         self.map = map
         self.dim = dim
-        self.domain = domain
         self.type = type
-        self._Setting()
+        self._Setting(domain=domain,**kwargs)
+        self.evals = None
+        self.evecs = None
+        self.matrix = None
+        self._isSaveVector=True
         
-    def _Setting(self):
+        
+    def _Setting(self, domain, **kwargs):
+        tau = kwargs['tau'] if "tau" in kwargs else 1
         if self.type in [None, 'Unitary', 'uniraty','u','U'] :
-            self.qmap  = Unitary(self.map, self.dim)
-            self.qmap.setDomain(self.domain)
+            self.qmap  = Unitary(self.map, self.dim, tau)
+        elif self.type in ["S","Symetric"]:
+            self.qmap = SymetricUnitary(self.map, self.dim, tau)
+        else:
+            raise TypeError("type Error")
+        self.qmap.setDomain(domain)
+        self.scaleinfo = self.qmap.scaleinfo
     
-    def getEigen(self, **kwargs): #,fft=True, core=2, verbose=False):
-        haskey = self._hasKey('fft', 'core', 'verbose','left', 'solver',**kwargs)
+    def setMatrix(self, **kwargs):
+        haskey = self._hasKey('fft', 'core', 'verbose','left', 'solver','sort', **kwargs)
         fft = kwargs['fft'] if haskey[0] else True
         core = kwargs['core'] if haskey[1]  else 2
-        verbose = kwargs['verbose'] if haskey[2] else False
-        left = kwargs['left'] if haskey[3] else False
-        solver = kwargs['left'] if haskey[3] else 'qeispack'        
-        
-        if self.qmap.evals == None or self.qmap.evecs == None:
-            self.qmap.setMatrix(fft=fft, core=core, verbose=verbose)
-            self.qmap.eigen(left, solver, verbose=verbose)
-        return (self.qmap.evals, self.qmap.evecs)
+        verbose = kwargs['verbose'] if haskey[2] else False        
+        self.qmap.setMatrix(fft=fft, core=core, verbose=verbose)
+        self.matrix = self.qmap.getMatrix()
 
-    def getEnegry(self, **kwargs):
-        eval, evecs = self.getEigen(**kwargs)
-        qval = Vector([1.j*self.qmap.h*val.data/self.qmap.tau for val in eval])
-        return qval
+    def getMatrix(self):
+        if self.matrix == None:
+            self.setMtrix()
+        return self.matrix
+
+    def getEigen(self, **kwargs):
+        haskey = self._hasKey('left', 'solver','sort', **kwargs)
+        left = kwargs['left'] if haskey[0] else False
+        solver = kwargs['solver'] if haskey[1] else 'qeispack'
+        verbose = kwargs['verbose'] if haskey[2] else False                
+        
+        if self.matrix == None:
+            self.setMatrix(**kwargs)
+        if self.evals == None or self.evecs == None:
+            self.evals, evecs = self.matrix.eigen(left, solver, verbose=verbose)
+            self.evecs = [ State(self.scaleinfo, evec) for evec in evecs ]
+        return (self.evals, self.evecs)
+
+    def getEnergy(self,**kwargs):
+        evals, evecs = self.getEigen(**kwargs)
+        energy = mpArray([1.j*self.qmap.h*mpmath.log(val)/self.qmap.tau for val in evals])
+        #energy = [x.real for x in ene]
+        #decay = [x.imag for x in ene]
+        return energy
     
-    def sorted(self):
-        pass
+    def sortEigen(self, val=None, order=True, index=None):
+        if self.evals==None:  raise AttributeError("eigenvectors, eigenvalues is None")
+        if index == None:
+            index =[i[0] for i in sorted(enumerate(val), key=lambda x:x[1])]
+        if order:
+            self.evals = [self.evals[i] for i in index]
+            self.evecs = [mpArray(self.evecs[i]) for i in index]
+        else:
+            self.evals = [self.evals[i] for i in index[::-1]]
+            self.evecs = [mpArray(self.evecs[i]) for i in index[::-1]]
+        
     
     def saveEigen(self, **kwargs):
-        haskey = self._hasKey('fft', 'core', 'verbose',**kwargs)
-        fft = kwargs['fft'] if haskey[0] else True
-        core = kwargs['core'] if haskey[1] else 2
-        verbose = kwargs['verbose'] if haskey[2] else False
-
-        if self.qmap.evals ==None or self.qmap.evecs == None:
-            self.qmap.setMatrix(fft=fft, core=core, verbose=verbose)
-            self.qmap.eigen(left=False, solver='qeispack',verbose=verbose)
+        if self.evals ==None or self.evecs == None:
+            self.getEigen(**kwargs)
             
-        self.qmap.saveEigen(verbose=verbose)
+        self.saveEvecs()
+        self.saveEvals()
     
     def saveEvecs(self):
-        if self.qmap.evecs == None:
-            raise ValueError("does not exists eigen-vectors") 
-        for i, evec in enumerate(self.qmap.evecs):
+        if self.evecs == None: raise AttributeError("does not exists eigen-vectors")
+
+        for i, evec in enumerate(self.evecs):
             f = open("eigen_qrep_%d.dat" % i, "w")
             x = self.qmap.scaleinfo.x[0]
             abs2 = evec.abs2()
+            re = evec.real()
+            im = evec.imag()
             self._annotate(f)
             f.write("# q-representation eigenvector, %d-th\n" % i )            
-            f.write("# EIGENVALUE REAL %s\n" % self.qmap.evals.data[i].real)
-            f.write("# EIGENVALUE IMAG %s\n" % self.qmap.evals.data[i].imag)
+            f.write("# EIGENVALUE REAL %s\n" % self.evals[i].real)
+            f.write("# EIGENVALUE IMAG %s\n" % self.evals[i].imag)
             f.write("# q, evec(q)*conj(evec(q)), Real[evec(q)], Imag[evec(q)]\n")            
-            [f.write("%s %s %s %s \n" % (x[j], abs2[j], evec.data[j].real, evec.data[j].imag)) for j in range(self.dim)]
+            [f.write("%s %s %s %s \n" % (x[j], abs2[j], re[j], im[j])) for j in range(self.dim)]
             f.close()
-        self._isSave=True
-
+        self._isSaveVector=True
+    
+    def saveEvals(self,title='eigen_vals.dat'):
+        if self.evals == None: raise AttributeError("does not exists eigen-values")
+        energy = self.getEnergy()
+        with open(title, "w") as f:
+            self._annotate(f)
+            f.write("# index, Re[eval], Im[eval], energy, deday")
+            for i, eval in enumerate(self.evals):
+                ene = energy[i]
+                f.write("%d %s %s %s %s\n" % (i, eval.real, eval.imag, ene.real,ene.imag))
+    
     def _annotate(self, f):
         import datetime
         f.write("# DATE: %s\n" % datetime.datetime.now() )
@@ -380,34 +425,15 @@ class QmapSystem(object):
         f.write("# PMAX %s\n" % self.qmap.scaleinfo.domain[1][1])
         
     def saveHsm(self, hsm_region=None,grid=[100,100],core=2,verbose=False):
-        try:
-            self._isSave
-        except AttributeError:
-            self.saveEvecs()
+        if not self._isSaveVector:
+            self.saveEvecs()            
         if hsm_region == None:
             hsm_region = self.qmap.scaleinfo.domain
         from utility import parallel as p
         p.multi_hsm(hsm_region, grid,core=core,verbose=verbose)
-        #for i,evec in enumerate(self.qmap.evecs):
-        #    title = 'eigen_hsm_%d.dat' % i
-        #    evec.save_hsmrep(col,row,hsm_region,title=title)
         
             
-    def getMatrix(self,**kwargs):
-        haskey = self._hasKey('fft', 'core', 'verbose',**kwargs)
-        fft = kwargs['fft'] if haskey[0] else True
-        core = kwargs['core'] if haskey[1] in kwargs else 2
-        verbose = kwargs['verbose'] if haskey[2] else False
 
-        if self.qmap.matrix == None:
-            self.qmap.setMatrix(fft=fft, core=core, verbose=verbose)        
-        return self.qmap.matrix
-    
     def _hasKey(self,*args,**kwargs):
         return [args[i] in kwargs for i in range(len(args))]
     
-
-        
-    
-            
-        
