@@ -19,4 +19,4 @@ for dir in ${dirs}; do
     echo ""
     cd ../
 done
-cd ..
+
