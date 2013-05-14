@@ -15,7 +15,7 @@ subroutine read_matrix(fname, dim, M)
      stop ',cannot open file'
   end if
   ! fortran is used row-major order
-  read(u,*) ( (M(j,i), j=1,dim), i=1,dim)
+  read(u,*) ( (M(i,j), j=1,dim), i=1,dim)
   close(u)
   return
 end subroutine read_matrix
