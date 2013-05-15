@@ -21,4 +21,5 @@ mpmapy is free software and distributed under the GNU LGPL linence.
 
 * version 0.1 release on May 7, 2013
 * version 0.2 release on May 15, 2013
+* version 0.3 release on May 15, 2013
 
