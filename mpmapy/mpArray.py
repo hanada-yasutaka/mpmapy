@@ -41,6 +41,8 @@ class mpArray(numpy.ndarray):
     
     def normalize(self):
         return self/mpmath.sqrt(self.norm())
+    def conj(self):
+        return numpy.conj(self)
     
     @classmethod
     def ones(cls, dim):
