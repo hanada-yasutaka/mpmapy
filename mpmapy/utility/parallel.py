@@ -54,7 +54,7 @@ def multi_hsm(hsm_region, grid, core, verbose=False):
     k = 0
     for j in range(iter_max):
         if verbose:
-            print(files[j],"->",files[j].replace("qrep","hsm"))
+            print([(files[i+k],"->",files[i+k].replace("qrep","hsm")) for i in range(core)])
         #title="eigen_hsm_%d.dat" % j
         p = [Process(target=qrep2hsm.qrep2hsm, args=(files[i+k],hsm_region,grid)) for i in range(core)]
         [p[i].start() for i in range(core)]
@@ -62,6 +62,8 @@ def multi_hsm(hsm_region, grid, core, verbose=False):
         k = k + core
     rest = (data_num % core)
     if rest !=0:
+        if verbose:
+            print([(files[i+k],"->",files[i+k].replace("qrep","hsm")) for i in range(rest) ])
         p = [Process(target=qrep2hsm.qrep2hsm, args=(files[i+k],hsm_region,grid)) for i in range(rest)]
         [p[i].start() for i in range(rest)]
         for i in range(rest):
