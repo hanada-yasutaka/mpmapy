@@ -1,5 +1,5 @@
+# -*- coding:utf-8 -*-
 from mpArray import *
-#import mpmath
 import mpfft
 #import time
 twopi = mpmath.mpf("2")*mpmath.pi
@@ -108,7 +108,6 @@ class State(mpArray):
         x = numpy.linspace(self._hsm_region[0][0], self._hsm_region[0][1], row)
         y = numpy.linspace(self._hsm_region[1][0], self._hsm_region[1][1], col)
         X,Y = numpy.meshgrid(x,y)
-
         return X,Y,hsm_imag
     
     def _mult_save_hsmrep(self, **kwargs):
@@ -148,8 +147,8 @@ class State(mpArray):
         im = (x - q_c)*p_c*twopi/self.scaleinfo.h
         res = mpArray([mpmath.exp(mpmath.mpc(re[i], im[i])) for i in range(len(x))])
         return res.normalize()
-
-
+    
+    # todo: like classmethod 
     def cs(self, q_c, p_c):
         qrange = self.scaleinfo.domain[0]
         d = qrange[1] - qrange[0]
@@ -331,7 +330,7 @@ class SymetricUnitary(Unitary):
         pvec = self.operator[1]*pvec #[self.operator[1].data[i]*pvec[i] for i in range(self.dim)]
         qvec = mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
         
-        qvec =self.operator[0]*qvec
+        qvec = self.operator[0]*qvec
         pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
         
         self.stateOut = mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
@@ -350,9 +349,10 @@ class NonUnitary(Unitary):
         self.tau = tau
         self.matrix = None        
         self.absorber = [mpArray.ones(dim) for i in range(2)]
-        self._dummy = [True, True]            
+        self._dummy = [True, True,True]
+        self.gamma = []
     
-    def setAbsorber(self, qp=None, atype=None, region=None, normalize=False):
+    def setAbsorber(self, qp=None, atype=None, region=None, **kwargs):
         start = time.time()
         qptypes = (None, 'q', 'p')
         atypes = ('box') #, 'cs', 'hole', 'opt','exp', 'tanh')
@@ -361,21 +361,30 @@ class NonUnitary(Unitary):
         
         if atype == 'box':
             absorber = self.box(qp, region)
+        
+        elif atype == 'hole':
+            absorber = self.hole(region, **kwargs)
+            if self._dummy[2]:
+                self._operate = self.operate
+                self.operate = self.hole_operate
+                self._dummy[2] = False
+            qp = 'cs'
+        
         else:
             absorber = None
             self.absorber = [ mpArray.ones(self.dim) for i in range(2)]
             print("Worning: absorbert does not set")
         
-        
-        
-        self.addAbsorber(qp=qp, data = absorber, normalize=normalize)
-        
-        
+
+        self.addAbsorber(qp=qp, data = absorber, **kwargs)
+
+
         if True in (numpy.abs(self.absorber[0]) > 1.0) or True in (numpy.abs(self.absorber[1]) > 1.0):
             raise ValueError("souce term fund: absorber > 1.0")
-        print("setAbsorb:", time.time() -start, 'sec.')
+        if "verbose" in kwargs and kwargs['verbose']:
+            print("setAbsorb:", time.time() -start, 'sec.')
     
-    def addAbsorber(self, qp, data=None, normalize=False):
+    def addAbsorber(self, qp, data=None, **kwargs):
         if data != None and qp == 'q':
             if self._dummy[0]:
                 self.absorber[0] = mpArray(self.dim)
@@ -383,13 +392,17 @@ class NonUnitary(Unitary):
             self.absorber[0] += data
         elif qp =='p':
             if self._dummy[1]:
-                self.absorber[1] = mpArray(self.dim)
+                self.absorber = mpArray(self.dim)
                 self._dummy[1] = False
             self.absorber[1] += data
-        
+        elif qp == 'cs':
+            index = len(self.absorber)
+            self.absorber.append(mpArray(self.dim))
+            self.absorber[index] = data
+            
         if self._isShift():
             self.absorber[1] = numpy.fft.fftshift(self.absorber[1])
-        if normalize:
+        if "normalize" in kwargs and kwargs["normalize"]:
             self.absorber[0] = self.absorber[0]/self.absorber.norm()
         
     def box(self, qp, region):
@@ -402,15 +415,16 @@ class NonUnitary(Unitary):
             raise TypeError("excepted first arg is 'q' or 'p'")
         return index*mpArray.ones(self.dim)
         
-    def hole(self, region):
-        pass
+    def hole(self, region, **kwargs):
+        if not "gamma" in kwargs:
+            raise ValueError("kwargs, gamma")
+        self.gamma.append(kwargs['gamma'])
+
+        return State(self.scaleinfo).cs(region[0], region[1])
         
     def operate(self, invec=None, queue=None, verbose=False):
         if invec != None:
-            #if isinstance(invec, mpArray):
             self.setIn(invec)
-            #elif isinstance(invec, list) and self.dim==len(invec):
-            #    self.setIn(mpArray(invec))
 
         qvec = self.absorber[0]*self.operator[0]*self.stateIn
         pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
@@ -420,7 +434,49 @@ class NonUnitary(Unitary):
         if queue !=None: 
             queue.put(self.stateOut)
     
+    def hole_operate(self, invec=None, queue=None, verbose=False):
+        self._operate(invec, None, False) # = self.operate
+        #unitary = self.stateOut.copy()
+        for i in range(2,len(self.absorber)):
+            self.stateOut -= self.absorber[i]*self.stateOut.dot(self.absorber[i].conj())*self.gamma[i-2]*mpmath.mpf("0.5")
+        #self.stateOut = unitary - decay
+        if queue !=None:
+            queue.put(self.stateOut)
 
+class SymetricNonUnitary(NonUnitary):
+    def __init__(self, map, dim, tau):
+        NonUnitary.__init__(self, map, dim, tau)
+
+    def op0(self, x, isShift=False):
+        if isShift:
+            sub_x = numpy.fft.fftshift(x)
+            func = self.map.ifunc0(sub_x)
+            self.operator[0] = mpArray([ mpmath.exp(mpmath.mpc("0", -twopi*func[i]*self.tau/self.h*mpmath.mpf("0.5"))) for i in range(self.dim) ])
+        else:
+            func = self.map.ifunc0(x)
+            self.operator[0] = mpArray([ mpmath.exp(mpmath.mpc("0", -twopi*func[i]*self.tau/self.h*mpmath.mpf("0.5"))) for i in range(self.dim) ])    
+
+    def operate(self, invec=None, queue=None, verbose=False):
+        if invec != None:
+            if isinstance(invec, mpArray):
+                self.setIn(invec)
+            elif isinstance(invec, list) and self.dim==len(invec):
+                self.setIn(mpArray(invec))
+
+        qvec = self.absorber[0]*self.operator[0]*self.stateIn
+        pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
+        
+        
+        pvec = self.absorber[1]*self.operator[1]*pvec #[self.operator[1].data[i]*pvec[i] for i in range(self.dim)]
+        qvec = mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
+        
+        qvec = self.absorber[0]*self.operator[0]*qvec
+        pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
+        
+        self.stateOut = self.absorber[0]*mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
+        
+        if queue !=None: 
+            queue.put(self.stateOut)
 
 class QmapSystem(object):
     def __init__(self, map, dim, type, domain, **kwargs):
@@ -441,6 +497,9 @@ class QmapSystem(object):
             self.qmap = SymetricUnitary(self.map, self.dim, tau)
         elif self.type in ['NU','nonunitary','open']:
             self.qmap = NonUnitary(self.map, self.dim, tau)
+            self.setAbsorber = self.qmap.setAbsorber
+        elif self.type in ['SNU', 'symetricnonunitary','snu']:
+            self.qmap = SymetricNonUnitary(self.map, self.dim, tau)
             self.setAbsorber = self.qmap.setAbsorber
         else:
             raise TypeError("type Error")
