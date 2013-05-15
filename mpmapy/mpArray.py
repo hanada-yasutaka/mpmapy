@@ -35,7 +35,10 @@ class mpArray(numpy.ndarray):
             return  self.dot(numpy.conj(self))
         else:
             return self.dot(numpy.conj(out_arr))
-
+    
+    def fftshift(self):
+        return mpArray(numpy.fft.fftshift(self))
+    
     def abs2(self):
         return mpArray(numpy.abs(self*numpy.conj(self)))
     
