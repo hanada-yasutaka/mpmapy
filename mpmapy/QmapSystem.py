@@ -69,6 +69,7 @@ class State(mpArray):
         obj.scaleinfo = scaleinfo
         obj.dim = scaleinfo.dim
         return obj
+
     def __array_finalize__(self, obj):
         if obj is None: return
         self.scaleinfo = getattr(obj, 'scaleinfo',None)
@@ -85,6 +86,20 @@ class State(mpArray):
         vec.append(self[0])
         arr = mpArray(vec)
         return arr.inner(arr[::-1]).real 
+    
+    def savetxt(self, title, qp='q', abs2=False, header=None):
+        with open(title, 'w') as f:
+            if header != None:
+                [f.write("%s" % head ) for head in header]
+            if qp == 'p': x = self.scaleinfo.x[1]
+            else: x = self.scaleinfo.x[0]
+            re = self.real
+            im = self.imag            
+            if abs2:
+                abs2 = self.abs2()
+                [f.write("%s %s %s %s \n" % (x[j], abs2[j], re[j], im[j])) for j in range(len(self))]
+            else:
+                [f.write("%s %s %s \n" % (x[j], re[j], im[j])) for j in range(len(self))]
     
     def set_qconst(self, q_c):
         self = State(self.scaleinfo)
@@ -149,6 +164,7 @@ class State(mpArray):
         return res.normalize()
     
     # todo: like classmethod 
+
     def cs(self, q_c, p_c):
         qrange = self.scaleinfo.domain[0]
         d = qrange[1] - qrange[0]
@@ -341,79 +357,94 @@ class SymetricUnitary(Unitary):
 class NonUnitary(Unitary):
     def __init__(self, map, dim, tau):
         Qmap.__init__(self, dim)
-        #Unitary.__init__(self, map, dim, tau)
-        self.map = map
         if not isinstance(tau, mpmath.mpf) and  not isinstance(tau, int) and not isinstance(tau, mpmath.mpc):
             raise TypeError("tau types must be mpmath.mpf or mpmath.mpc or integer")
-    
+        
+        self.map = map    
         self.tau = tau
         self.matrix = None        
         self.absorber = [mpArray.ones(dim) for i in range(2)]
-        self._dummy = [True, True,True]
+        self.__dummy = [True, True,True]
         self.gamma = []
-    
+        
     def setAbsorber(self, qp=None, atype=None, region=None, **kwargs):
         start = time.time()
         qptypes = (None, 'q', 'p')
-        atypes = ('box') #, 'cs', 'hole', 'opt','exp', 'tanh')
+        atypes = ('box', 'cs', 'hole','exp', 'tanh','opt')
+
         if not qp in qptypes:
             raise TypeError("excepted first arg; 'qp' in", qptypes)
         
         if atype == 'box':
             absorber = self.box(qp, region)
-        
-        elif atype == 'hole':
+        elif atype == 'hole' or atype == 'cs':
             absorber = self.hole(region, **kwargs)
-            if self._dummy[2]:
+            if self.__dummy[2]:
                 self._operate = self.operate
                 self.operate = self.hole_operate
-                self._dummy[2] = False
+                self.__dummy[2] = False
             qp = 'cs'
-        
+        elif atype == 'exp':
+            absorber = self.abfunc(self.exp, qp, region, **kwargs)
+        elif atype == 'tanh':
+            absorber = self.abfunc(self.tanh, qp, region, **kwargs)
+        elif atype == 'opt':
+            absorber = self.abfunc(self.opt, qp, region, **kwargs)            
         else:
             absorber = None
             self.absorber = [ mpArray.ones(self.dim) for i in range(2)]
             print("Worning: absorbert does not set")
-        
 
         self.addAbsorber(qp=qp, data = absorber, **kwargs)
-
-
+                
         if True in (numpy.abs(self.absorber[0]) > 1.0) or True in (numpy.abs(self.absorber[1]) > 1.0):
-            raise ValueError("souce term fund: absorber > 1.0")
-        if "verbose" in kwargs and kwargs['verbose']:
-            print("setAbsorb:", time.time() -start, 'sec.')
+            raise ValueError("souce term fund: absorber > 1.0:")
+
     
     def addAbsorber(self, qp, data=None, **kwargs):
         if data != None and qp == 'q':
-            if self._dummy[0]:
+            if self.__dummy[0]:
                 self.absorber[0] = mpArray(self.dim)
-                self._dummy[0] = False
+                self.__dummy[0] = False
+
             self.absorber[0] += data
+
+            if True in (numpy.abs(self.absorber[0]) > 1.0):
+                self.absorber[0] = self.absorber[0]/self.absorber[0].real.max()            
+
+            x = State(self.scaleinfo, self.absorber[0])
+            x.savetxt("absorber_q.dat")
+        
         elif qp =='p':
-            if self._dummy[1]:
-                self.absorber = mpArray(self.dim)
-                self._dummy[1] = False
+            if self.__dummy[1]:
+                self.absorber[1] = mpArray(self.dim)
+                self.__dummy[1] = False
+
             self.absorber[1] += data
+
+            if True in (numpy.abs(self.absorber[1]) > 1.0):
+                self.absorber[1] = self.absorber[1]/self.absorber[1].real.max()            
+
+            x = State(self.scaleinfo, self.absorber[1])
+            x.savetxt("absorber_p.dat",qp="p")            
+        
         elif qp == 'cs':
             index = len(self.absorber)
             self.absorber.append(mpArray(self.dim))
             self.absorber[index] = data
             
-        if self._isShift():
-            self.absorber[1] = numpy.fft.fftshift(self.absorber[1])
-        if "normalize" in kwargs and kwargs["normalize"]:
-            self.absorber[0] = self.absorber[0]/self.absorber.norm()
+            x = State(self.scaleinfo, mpArray.ones(self.dim) - self.absorber[index])
+            x.savetxt("absorber_hole_%d.dat" % (index - 2))            
         
     def box(self, qp, region):
-        if region == None: raise ValueError("region is None")
+        if region == None: raise ValueError("region == None")
         if qp == 'q':
             index = (self.scaleinfo.x[0] > region[0]) & (self.scaleinfo.x[0] < region[1])
         elif qp == 'p':
             index = (self.scaleinfo.x[1] > region[0]) & (self.scaleinfo.x[1] < region[1])
         else:
             raise TypeError("excepted first arg is 'q' or 'p'")
-        return index*mpArray.ones(self.dim)
+        return mpArray.ones(self.dim)*index
         
     def hole(self, region, **kwargs):
         if not "gamma" in kwargs:
@@ -421,11 +452,58 @@ class NonUnitary(Unitary):
         self.gamma.append(kwargs['gamma'])
 
         return State(self.scaleinfo).cs(region[0], region[1])
-        
+
+    def abfunc(self, func, qp, region, **kwargs):
+        if qp == 'q':
+            abfunc = func(self.scaleinfo.x[0], region[0], region[1], **kwargs)
+        elif qp == 'p':
+            abfunc = func(self.scaleinfo.x[1], region[0], region[1], **kwargs)
+        if 'cut' in kwargs:
+            cut = kwargs['cut']
+        else:
+            cut = mpmath.mpf("1e-32")
+        index = abfunc > cut
+        return abfunc*index
+    
+    def opt(self, x, x1, x2, **kwargs):
+        if not 'beta' in kwargs: raise ValueError("excepted kwargs: 'beta'")
+        beta = kwargs['beta']
+        expo = self._expotanh(x, x1, x2, **kwargs)
+        return mpArray([mpmath.exp(expo[i]/(twopi*self.scaleinfo.h)*beta) for i in range(len(x))])
+    
+    def exp(self, x, x1,x2,**kwargs):
+        if not 'beta' in kwargs: raise ValueError("excepted kwargs: 'beta'")
+        beta = kwargs['beta']
+        expo = self._expotanh(x, x1, x2, **kwargs)
+        return mpArray([mpmath.exp(expo[i]/(twopi)*beta) for i in range(len(x))])
+    
+    def _expotanh(self, x, x1, x2, **kwargs):
+        if 'alpha' in kwargs:
+            alpha=kwargs['alpha']
+        else:
+            alpha=mpmath.mpf("1e10")
+        print alpha
+        z1 = x - x1
+        z2 = x - x2
+        y1 = mpArray([ mpmath.mpf("0.5")*(mpmath.mpf("1") - mpmath.tanh(x*alpha)) for x in z1 ]) 
+        y2 = mpArray([ mpmath.mpf("0.5")*(mpmath.mpf("1") + mpmath.tanh(x*alpha)) for x in z2 ])
+
+        return -(z1*z1*y1 + z2*z2*y2)        
+        #return numpy.exp((-(z1**2*y1 + z2**2*y2)/(twopi*beta*h)))        
+    
+    def tanh(self, x, x1, x2, **kwargs):
+        if not 'beta' in kwargs: raise ValueError("excepted kwargs: 'beta'")
+        beta = kwargs['beta']
+        z1 = (x - x1)*beta
+        z2 = (x - x2)*beta
+        return mpArray( [ mpmath.mpf("0.5")*(mpmath.tanh(z1[i]) - mpmath.tanh(z2[i])) for i in range(len(x)) ])
+
     def operate(self, invec=None, queue=None, verbose=False):
         if invec != None:
             self.setIn(invec)
-
+        ## tood: 一度だけしか呼びたくない
+        if self._isShift():
+            self.absorber[1] = self.absorber[1].fftshift()
         qvec = self.absorber[0]*self.operator[0]*self.stateIn
         pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
         pvec = self.absorber[1]*self.operator[1]*pvec 
@@ -436,10 +514,8 @@ class NonUnitary(Unitary):
     
     def hole_operate(self, invec=None, queue=None, verbose=False):
         self._operate(invec, None, False) # = self.operate
-        #unitary = self.stateOut.copy()
         for i in range(2,len(self.absorber)):
             self.stateOut -= self.absorber[i]*self.stateOut.dot(self.absorber[i].conj())*self.gamma[i-2]*mpmath.mpf("0.5")
-        #self.stateOut = unitary - decay
         if queue !=None:
             queue.put(self.stateOut)
 
@@ -462,12 +538,14 @@ class SymetricNonUnitary(NonUnitary):
                 self.setIn(invec)
             elif isinstance(invec, list) and self.dim==len(invec):
                 self.setIn(mpArray(invec))
+        ## tood: 一度だけしか呼びたくない
+        if self._isShift():
+            self.absorber[1] = self.absorber[1].fftshift()
 
         qvec = self.absorber[0]*self.operator[0]*self.stateIn
         pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
         
-        
-        pvec = self.absorber[1]*self.operator[1]*pvec #[self.operator[1].data[i]*pvec[i] for i in range(self.dim)]
+        pvec = self.absorber[1]*self.operator[1]*pvec
         qvec = mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
         
         qvec = self.absorber[0]*self.operator[0]*qvec
