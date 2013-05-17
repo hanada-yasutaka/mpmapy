@@ -88,8 +88,11 @@ class State(mpArray):
         return arr.inner(arr[::-1]).real 
     
     def savetxt(self, title, qp='q', abs2=False, header=None):
+        #todo header numpy.savetxt
         with open(title, 'w') as f:
+            [f.write("%s" % a ) for a in self.__annotate()]
             if header != None:
+                header += "\n" 
                 [f.write("%s" % head ) for head in header]
             if qp == 'p': x = self.scaleinfo.x[1]
             else: x = self.scaleinfo.x[0]
@@ -100,7 +103,16 @@ class State(mpArray):
                 [f.write("%s %s %s %s \n" % (x[j], abs2[j], re[j], im[j])) for j in range(len(self))]
             else:
                 [f.write("%s %s %s \n" % (x[j], re[j], im[j])) for j in range(len(self))]
-    
+    def __annotate(self):
+        import datetime
+        ann ="# DATE: %s\n" % datetime.datetime.now()
+        ann += "# DIM %d\n" % self.dim
+        ann += "# QMIN %s\n" % self.scaleinfo.domain[0][0]
+        ann += "# QMAX %s\n" % self.scaleinfo.domain[0][1]
+        ann += "# PMIN %s\n" % self.scaleinfo.domain[1][0]
+        ann += "# PMAX %s\n" % self.scaleinfo.domain[1][1]
+        return ann
+
     def set_qconst(self, q_c):
         self = State(self.scaleinfo)
         q = self.scaleinfo.x[0]
@@ -140,18 +152,16 @@ class State(mpArray):
     def save_hsmrep(self,col, row, hsm_region=None, title=None):
         if title==None:
             raise ValueError("title is None")
-        domain  = self.scaleinfo.domain
-        import datetime   
         X, Y, hsm_imag = self.hsmrep(col,row, hsm_region)
+        data = numpy.array([X,Y,hsm_imag])
         with open(title, "w") as of:
-            of.write("# DATE %s\n" % datetime.datetime.now())
-            of.write("# DIM %d\n# QMIN %f\n# QMAX %f\n" % (self.dim, domain[0][0], domain[0][1]))
-            of.write("# PMIN %f\n# PMAX %f\n" % (domain[1][0],domain[1][1]))
+            [of.write("%s" % a ) for a in self.__annotate()]
             of.write("# VQMIN %f\n# VQMAX %f\n# VPMIN %f\n# VPMAX %f\n" % (self._hsm_region[0][0], self._hsm_region[0][1], self._hsm_region[1][0], self._hsm_region[1][1]))
             of.write("# ROW %d\n# COL %d\n" % (row, col))
-            for slice_data in hsm_imag.transpose():
-                numpy.savetxt(of, slice_data)
-            of.write("\n") 
+            for slice_data in data.transpose():
+                [ of.write("%f %f %.18e\n"  % slice_data[0][i], slice_data[1][i], slice_data[2][i]) for i in range(len(slice_data[0])) ]
+                #numpy.savetxt(of, slice_data)
+                of.write("\n") 
 
     def _cs(self, q_c, p_c, x=None):
         if not isinstance(q_c, mpmath.mpf) and not isinstance(p_c, mpmath.mpf):
@@ -168,8 +178,8 @@ class State(mpArray):
     def cs(self, q_c, p_c):
         qrange = self.scaleinfo.domain[0]
         d = qrange[1] - qrange[0]
-        lqmin, lqmax = qrange[0] - d, qrange[1] + d
-        long_q = mpArray.linspace(lqmin, lqmax, 3*self.dim, endpoint=False)
+        lqmin, lqmax = qrange[0] - 2*d, qrange[1] + 2*d
+        long_q = mpArray.linspace(lqmin, lqmax, 5*self.dim, endpoint=False)
         
         coh_state = self._cs(q_c, p_c, long_q)
 
@@ -180,8 +190,7 @@ class State(mpArray):
         for i in range(m):
             vec += coh_state[i][::1]
         return State(self.scaleinfo, vec.normalize())
-        
-           
+
 class Qmap(HilbertSpace):
     def __init__(self,dim):
         HilbertSpace.__init__(self, dim)
@@ -565,13 +574,13 @@ class QmapSystem(object):
         self.evals = None
         self.evecs = None
         self.matrix = None
-        self._isSaveVector=True
+        self._isSaveVector=False
         
     def _Setting(self, domain, **kwargs):
         tau = kwargs['tau'] if "tau" in kwargs else 1
         if self.type in [None, 'unitary' ,'u','U'] :
             self.qmap  = Unitary(self.map, self.dim, tau)
-        elif self.type in ["S","symetric"]:
+        elif self.type in ["S","symetric","SU"]:
             self.qmap = SymetricUnitary(self.map, self.dim, tau)
         elif self.type in ['NU','nonunitary','open']:
             self.qmap = NonUnitary(self.map, self.dim, tau)
@@ -581,6 +590,7 @@ class QmapSystem(object):
             self.setAbsorber = self.qmap.setAbsorber
         else:
             raise TypeError("type Error")
+        
         self.qmap.setDomain(domain)
         self.scaleinfo = self.qmap.scaleinfo
     
@@ -616,8 +626,6 @@ class QmapSystem(object):
     def getEnergy(self,**kwargs):
         evals, evecs = self.getEigen(**kwargs)
         energy = mpArray([1.j*self.qmap.h*mpmath.log(val)/self.qmap.tau for val in evals])
-        #energy = [x.real for x in ene]
-        #decay = [x.imag for x in ene]
         return energy
     
     def sortEigen(self, val=None, order=True, index=None):
@@ -626,10 +634,10 @@ class QmapSystem(object):
             index =[i[0] for i in sorted(enumerate(val), key=lambda x:x[1])]
         if order:
             self.evals = [self.evals[i] for i in index]
-            self.evecs = [mpArray(self.evecs[i]) for i in index]
+            self.evecs = [State(self.scaleinfo, self.evecs[i]) for i in index]
         else:
             self.evals = [self.evals[i] for i in index[::-1]]
-            self.evecs = [mpArray(self.evecs[i]) for i in index[::-1]]
+            self.evecs = [State(self.scaleinfo, self.evecs[i]) for i in index[::-1]]
         
     def saveEigen(self, **kwargs):
         if self.evals ==None or self.evecs == None:
@@ -638,52 +646,38 @@ class QmapSystem(object):
         self.saveEvecs()
         self.saveEvals()
     
-    def saveEvecs(self):
+    def saveEvecs(self,qp='q'):
         if self.evecs == None: raise AttributeError("does not exists eigen-vectors")
 
         for i, evec in enumerate(self.evecs):
-            f = open("eigen_qrep_%d.dat" % i, "w")
-            x = self.qmap.scaleinfo.x[0]
-            abs2 = evec.abs2()
-            re = evec.real
-            im = evec.imag
-            self._annotate(f)
-            f.write("# q-representation eigenvector, %d-th\n" % i )            
-            f.write("# EIGENVALUE REAL %s\n" % self.evals[i].real)
-            f.write("# EIGENVALUE IMAG %s\n" % self.evals[i].imag)
-            f.write("# q, evec(q)*conj(evec(q)), Real[evec(q)], Imag[evec(q)]\n")            
-            [f.write("%s %s %s %s \n" % (x[j], abs2[j], re[j], im[j])) for j in range(self.dim)]
-            f.close()
+            header = "# q-representation eigenvector, %d-th\n" % i
+            header += "# EIGENVALUE REAL %s\n" % self.evals[i].real
+            header += "# EIGENVALUE IMAG %s\n" % self.evals[i].imag
+            header += "# q, evec(q)*conj(evec(q)), Real[evec(q)], Imag[evec(q)]\n"
+            title = "eigen_qrep_%i.dat" % i 
+            evec.savetxt(title=title, qp='q', abs2=True, header=header)
         self._isSaveVector=True
     
     def saveEvals(self,title='eigen_vals.dat'):
         if self.evals == None: raise AttributeError("does not exists eigen-values")
         energy = self.getEnergy()
         with open(title, "w") as f:
-            self._annotate(f)
-            f.write("# index, Re[eval], Im[eval], energy, deday")
+            import datetime
+            f.write("# DATE: %s\n" % datetime.datetime.now() )
+            f.write("# DIM %d\n" % self.dim )            
+            f.write("# index, Re[eval], Im[eval], energy, deday\n")
             for i, eval in enumerate(self.evals):
                 ene = energy[i]
                 f.write("%d %s %s %s %s\n" % (i, eval.real, eval.imag, ene.real,ene.imag))
-    
-    def _annotate(self, f):
-        import datetime
-        f.write("# DATE: %s\n" % datetime.datetime.now() )
-        f.write("# DIM %d\n" % self.dim )
-        f.write("# QMIN %s\n" % self.qmap.scaleinfo.domain[0][0])
-        f.write("# QMAX %s\n" % self.qmap.scaleinfo.domain[0][1])
-        f.write("# PMIN %s\n" % self.qmap.scaleinfo.domain[1][0])
-        f.write("# PMAX %s\n" % self.qmap.scaleinfo.domain[1][1])
-        
+
     def saveHsm(self, hsm_region=None,grid=[100,100],core=2,verbose=False):
         if not self._isSaveVector:
-            self.saveEvecs()            
+            self.saveEigen()            
         if hsm_region == None:
             hsm_region = self.qmap.scaleinfo.domain
         from utility import parallel as p
         p.multi_hsm(hsm_region, grid,core=core,verbose=verbose)
         
-            
 
     def _hasKey(self,*args,**kwargs):
         return [args[i] in kwargs for i in range(len(args))]
