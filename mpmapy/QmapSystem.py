@@ -58,6 +58,7 @@ class ScaleInfo(HilbertSpace):
 class State(mpArray):
     def __new__(cls, scaleinfo, data=None):
         if data != None and isinstance(data, mpArray):
+            obj = mpArray(data)
             obj = numpy.asarray(data, dtype='object').view(cls)
         elif isinstance(scaleinfo, ScaleInfo):
             data = [mpmath.mpc('0','0')]*scaleinfo.dim
@@ -216,7 +217,7 @@ class Qmap(HilbertSpace):
         self.stateOut = tmp
 
     def pull(self):
-        self.stateIn = mpArray(self.stateOut)
+        self.stateIn = self.stateOut
 
     def operate(self):
         pass
@@ -409,7 +410,6 @@ class NonUnitary(Unitary):
         if True in (numpy.abs(self.absorber[0]) > 1.0) or True in (numpy.abs(self.absorber[1]) > 1.0):
             raise ValueError("souce term fund: absorber > 1.0:")
 
-    
     def addAbsorber(self, qp, data=None, **kwargs):
         if data != None and qp == 'q':
             if self.__dummy[0]:
@@ -441,8 +441,8 @@ class NonUnitary(Unitary):
             index = len(self.absorber)
             self.absorber.append(mpArray(self.dim))
             self.absorber[index] = data
-            
-            x = State(self.scaleinfo, mpArray.ones(self.dim) - self.absorber[index])
+
+            x = State(self.scaleinfo, numpy.ones)  - self.absorber[index]
             x.savetxt("absorber_hole_%d.dat" % (index - 2))            
         
     def box(self, qp, region):
@@ -491,7 +491,7 @@ class NonUnitary(Unitary):
             alpha=kwargs['alpha']
         else:
             alpha=mpmath.mpf("1e10")
-        print alpha
+
         z1 = x - x1
         z2 = x - x2
         y1 = mpArray([ mpmath.mpf("0.5")*(mpmath.mpf("1") - mpmath.tanh(x*alpha)) for x in z1 ]) 
@@ -516,13 +516,15 @@ class NonUnitary(Unitary):
         qvec = self.absorber[0]*self.operator[0]*self.stateIn
         pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
         pvec = self.absorber[1]*self.operator[1]*pvec 
-        self.stateOut = self.absorber[0]*mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
-        
+        qvec = self.absorber[0]*mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
+        self.stateOut = State(self.scaleinfo, qvec)
         if queue !=None: 
             queue.put(self.stateOut)
     
     def hole_operate(self, invec=None, queue=None, verbose=False):
+
         self._operate(invec, None, False) # = self.operate
+        
         for i in range(2,len(self.absorber)):
             self.stateOut -= self.absorber[i]*self.stateOut.dot(self.absorber[i].conj())*self.gamma[i-2]*mpmath.mpf("0.5")
         if queue !=None:
@@ -560,8 +562,8 @@ class SymetricNonUnitary(NonUnitary):
         qvec = self.absorber[0]*self.operator[0]*qvec
         pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
         
-        self.stateOut = self.absorber[0]*mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
-        
+        qvec= self.absorber[0]*mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
+        self.stateOut = State(self.scaleinfo, qvec) 
         if queue !=None: 
             queue.put(self.stateOut)
 
