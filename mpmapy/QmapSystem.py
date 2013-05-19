@@ -5,57 +5,186 @@ import mpfft
 twopi = mpmath.mpf("2")*mpmath.pi
 
 class HilbertSpace(object):
+    """
+    Class of Hilbert Space 
+    
+    Parameters
+    ----------
+    dim : positive integer
+        Hilbert space dimension
+    
+    
+    Attributes
+    ----------
+    dim : integer
+        The Hilbert space dimension
+    
+    
+    Examples
+    ---------
+>>> from mpmapy.QmapSystem import HilbertSpace
+>>> hil = HilbertSpace(10)
+>>> hil.dim
+10
+>>> hil.dim = 20
+Traceback (most recent call last):
+  File "<ipython-input-11-3a749ab96df4>", line 1, in <module>
+    hil.dim = 20
+AttributeError: can't set attribute
+
+    """
+    
     def __init__(self, dim):
-        if not isinstance(dim, int):
-            raise ValueError('excepted integer')
-        self.dim = dim
+        if not isinstance(dim, int) or dim <= 0:
+            raise ValueError('excepted positive integer')
+        self.__dim = dim
+
+    @property
+    def dim(self):
+        """
+        return the Hilbert space dimension
+        """
+        return self.__dim
 
 class ScaleInfo(HilbertSpace):
-    def __init__(self, dim):
-        HilbertSpace.__init__(self, dim)
-        self.domain = [[None,None] for i in range(2)]
-        self.x = [None] * 2
-        self.h = None
-        
-    def setQdomain(self, qmin, qmax):
-        if not isinstance(qmin,int) and not isinstance(qmin, mpmath.mpf):
-            raise ValueError('input values have to be an integer or an mpmath.mpf value')
-        if not isinstance(qmax,int) and not isinstance(qmax, mpmath.mpf):
-            raise ValueError('input values have to be an integer or an mpmath.mpf value')
-        if qmin >= qmax:
-            raise ValueError('Error: qmin >= qmax ')
-        self.domain[0][0] = mpmath.mpf(qmin)
-        self.domain[0][1] = mpmath.mpf(qmax)
+    """
     
-    def setPdomain(self, pmin, pmax):
-        if not isinstance(pmin,int) and not isinstance(pmin, mpmath.mpf):
-            raise ValueError('input values have to be an integer or an mpmath.mpf value')
-        if not isinstance(pmax,int) and not isinstance(pmax, mpmath.mpf):
-            raise ValueError('input values have to be an integer or an mpmath.mpf value')
-        if pmin > pmax:
-            raise ValueError('Error: pmin >= pmax')
-        self.domain[1][0] = mpmath.mpf(pmin)
-        self.domain[1][1] = mpmath.mpf(pmax)
+    ScaleInfoはp及びqの定義域を設定するclassです．
+    
+    
+    Examples
+    ----------
+>>> import mpmath
+>>> from mpmapy.QmapSystem import ScaleInfo
+>>> mpmath.mp.dps = 8
+>>> scl=ScaleInfo(10, [[0,1],[mpmath.mpf("-0.5"), mpmath.mpf("0.5")]])
+>>> scl.x
+(mpArray([mpf('0.0'), mpf('0.099999999977'), mpf('0.19999999995'),
+       mpf('0.29999999981'), mpf('0.39999999991'), mpf('0.5'),
+       mpf('0.59999999963'), mpf('0.70000000019'), mpf('0.79999999981'),
+       mpf('0.89999999944')], dtype=object), mpArray([mpf('-0.5'), mpf('-0.39999999991'), mpf('-0.29999999981'),
+       mpf('-0.20000000019'), mpf('-0.10000000009'), mpf('0.0'),
+       mpf('0.099999999627'), mpf('0.20000000019'), mpf('0.29999999981'),
+       mpf('0.39999999944')], dtype=object))
+>>> scl.domain
+[(mpf('0.0'), mpf('1.0')), (mpf('-0.5'), mpf('0.5'))]
+>>> scl.h
+mpf('0.099999999977')
+>>> scl.x[0] = 1.0
+Traceback (most recent call last):
+  File "<ipython-input-28-28c26b1529fe>", line 1, in <module>
+    scl.x[0] = 1.0
+TypeError: 'tuple' object does not support item assignment
 
-    def setDomain(self, r):
-        self.setQdomain(r[0][0], r[0][1])
-        self.setPdomain(r[1][0], r[1][1])
-        self.x = [mpArray(mpmath.linspace(self.domain[i][0], self.domain[i][1], self.dim, endpoint=False)) for i in range(2)]
-        self.h = self.getPlanck()
+>>> scl.x = (1.0, 2.0)
+Traceback (most recent call last):
+  File "<ipython-input-29-8c19738e03d3>", line 1, in <module>
+    scl.x = (1.0, 2.0)
+AttributeError: can't set attribute
+    
+    """
+    
+    def __init__(self, dim, domain):
+        HilbertSpace.__init__(self, dim)
+        self._domain = [(None,None) for i in range(2)]
+        self.__setDomain(domain)
+#        self.__x = (None, None)
         
-    def getDomain(self):
-        return self.domain
+    def __setQdomain(self, qmin, qmax):
+        if not isinstance(qmin,int) and not isinstance(qmin, mpmath.mpf) and not isinstance(qmin, str):
+            raise ValueError('input values have to be an integer or an mpmath.mpf value')
+        if not isinstance(qmax,int) and not isinstance(qmax, mpmath.mpf) and not isinstance(qmax, str):
+            raise ValueError('input values have to be an integer or an mpmath.mpf value')
+        assert mpmath.mpf(qmin) < mpmath.mpf(qmax), "qmin >=qmax"
+        self._domain[0] = (mpmath.mpf(qmin), mpmath.mpf(qmax))
+    
+    def __setPdomain(self, pmin, pmax):
+        if not isinstance(pmin,int) and not isinstance(pmin, mpmath.mpf) and not isinstance(pmin, str):
+            raise ValueError('input values have to be an integer or an mpmath.mpf value')
+        if not isinstance(pmax,int) and not isinstance(pmax, mpmath.mpf) and not isinstance(pmax, str):
+            raise ValueError('input values have to be an integer or an mpmath.mpf value')
+        assert mpmath.mpf(pmin) < mpmath.mpf(pmax), "pmin >= pmax"
+        self._domain[1] = (mpmath.mpf(pmin), mpmath.mpf(pmax))        
 
-    def getX(self):
-        return self.x
+    def __setDomain(self, r):
+        self.__setQdomain(r[0][0], r[0][1])
+        self.__setPdomain(r[1][0], r[1][1])
+        x = [mpArray(mpmath.linspace(self.domain[i][0], self.domain[i][1], self.dim, endpoint=False)) for i in range(2) ]
+        self.__x = (x[0], x[1])
+    
+    @property
+    def domain(self):
+        return self._domain
+
+    @property
+    def x(self):
+        return self.__x
+    @property
+    def h(self):
+        return self.getVolume()/mpmath.mpf(self.dim)
 
     def getVolume(self):
         return (self.domain[0][1] - self.domain[0][0]) * (self.domain[1][1] - self.domain[1][0])
     
-    def getPlanck(self):
-        return self.getVolume()/mpmath.mpf(self.dim)
+    #def getPlanck(self):
+    #    return self.getVolume()/mpmath.mpf(self.dim)
 
 class State(mpArray):
+    """
+    State is Quantum state defined on the Hilbert space.
+    return new mpArray (numpy.ndarray) of the given shape
+    
+    Parameters
+    ----------
+    scaleinfo : ScaleInfo instance
+    data     : int or mpArray instance, (optional)
+        if data is None, return new array of the given scaleinfo.dim, filled with mpmath.mpc("0","0")
+        else return new array, filled given data.
+        note that data length must be scaleinfo.dim 
+        
+        
+    Examples
+    ----------
+>>> import mpmath
+>>> import mpmapy
+>>> from mpmapy.QmapSystem import ScaleInfo, State
+>>> mpmath.mp.dps=8
+>>> scl = ScaleInfo(5, [[0,1],[0,1]])
+>>> State(scl)
+State([mpc(real='0.0', imag='0.0'), mpc(real='0.0', imag='0.0'),
+       mpc(real='0.0', imag='0.0'), mpc(real='0.0', imag='0.0'),
+       mpc(real='0.0', imag='0.0')], dtype=object)
+>>> State(scl,mpmapy.mpArray.linspace(0,1,5))
+State([mpf('0.0'), mpf('0.19999999995'), mpf('0.39999999991'),
+       mpf('0.59999999963'), mpf('0.79999999981')], dtype=object)
+>>> State(scl,mpmapy.mpArray.linspace(0,1,6))
+Traceback (most recent call last):
+  File "<ipython-input-29-30b8d70dc493>", line 1, in <module>
+    State(scl,mpmapy.mpArray.linspace(0,1,6))
+  File "/Users/hanada/Dropbox/mpmapy/mpmapy/QmapSystem.py", line 154, in __new__
+    mpc(real='0.0', imag='0.0')], dtype=object)
+ValueError: data length does not match
+
+>>> a = State(scl,mpmapy.mpArray.linspace(0,1,5))
+>>> b = State(scl,mpmapy.mpArray.linspace(1,2,5))
+>>> c = a + b*1.j
+>>> c.scaleinfo.x
+(mpArray([mpf('0.0'), mpf('0.19999999995'), mpf('0.39999999991'),
+       mpf('0.59999999963'), mpf('0.79999999981')], dtype=object), mpArray([mpf('0.0'), mpf('0.19999999995'), mpf('0.39999999991'),
+       mpf('0.59999999963'), mpf('0.79999999981')], dtype=object))
+>>> c.scaleinfo.h
+mpf('0.19999999995')
+>>> c.scaleinfo.domain
+[(mpf('0.0'), mpf('1.0')), (mpf('0.0'), mpf('1.0'))]
+
+.. todo::
+
+>>> c = a + 1.j*b
+Traceback (most recent call last):
+  File "<ipython-input-37-e37ad28b64ea>", line 1, in <module>
+    c = a + 1.j*b
+TypeError: unsupported operand type(s) for *: 'complex' and 'State'
+    """
     def __new__(cls, scaleinfo, data=None):
         if data != None and isinstance(data, mpArray):
             obj = mpArray(data)
@@ -104,6 +233,7 @@ class State(mpArray):
                 [f.write("%s %s %s %s \n" % (x[j], abs2[j], re[j], im[j])) for j in range(len(self))]
             else:
                 [f.write("%s %s %s \n" % (x[j], re[j], im[j])) for j in range(len(self))]
+
     def __annotate(self):
         import datetime
         ann ="# DATE: %s\n" % datetime.datetime.now()
@@ -114,7 +244,29 @@ class State(mpArray):
         ann += "# PMAX %s\n" % self.scaleinfo.domain[1][1]
         return ann
 
-    def set_qconst(self, q_c):
+    def qconst(self, q_c):
+        """
+>>> from mpmapy.QmapSystem import ScaleInfo, State
+>>> import mpmath
+>>> mpmath.mp.dps = 15
+>>> scl = ScaleInfo(10, [["-0.5", "0.5"],["-0.5","0.5"]])
+>>> state = State(scl)
+>>> delta = state.qconst("0.0")
+>>> delta
+State([mpc(real='0.0', imag='0.0'), mpc(real='0.0', imag='0.0'),
+       mpc(real='0.0', imag='0.0'), mpc(real='0.0', imag='0.0'),
+       mpc(real='0.0', imag='0.0'), mpc(real='1.0', imag='0.0'),
+       mpc(real='0.0', imag='0.0'), mpc(real='0.0', imag='0.0'),
+       mpc(real='0.0', imag='0.0'), mpc(real='0.0', imag='0.0')], dtype=object)
+>>> delta.scaleinfo.x[0]
+mpArray([mpf('-0.5'), mpf('-0.40000000000000002'),
+       mpf('-0.29999999999999999'), mpf('-0.19999999999999996'),
+       mpf('-0.099999999999999978'), mpf('0.0'),
+       mpf('0.10000000000000009'), mpf('0.20000000000000007'),
+       mpf('0.30000000000000004'), mpf('0.40000000000000002')], dtype=object)
+       """
+        self.__raiseTypeError(q_c)
+        q_c = mpmath.mpf(q_c) 
         self = State(self.scaleinfo)
         q = self.scaleinfo.x[0]
         dx = mpmath.fabs(q[1] - q[0])
@@ -124,6 +276,7 @@ class State(mpArray):
         if index > self.dim - 1 or index < 0:
             raise ValueError('q_c set in (%s,%s) with %s' % (mpmath.nstr(qmin), mpmath.nstr(qmax), mpmath.nstr(dx)) )
         self[index] = mpmath.mpc("1", "0")
+        return State(self.scaleinfo, self)
     
     def hsmrep(self, col, row, hsm_region=None):
         if hsm_region==None:
@@ -177,6 +330,8 @@ class State(mpArray):
     # todo: like classmethod 
 
     def cs(self, q_c, p_c):
+        self.__raiseTypeError(q_c)
+        self.__raiseTypeError(p_c)
         qrange = self.scaleinfo.domain[0]
         d = qrange[1] - qrange[0]
         lqmin, lqmax = qrange[0] - 2*d, qrange[1] + 2*d
@@ -191,11 +346,13 @@ class State(mpArray):
         for i in range(m):
             vec += coh_state[i][::1]
         return State(self.scaleinfo, vec.normalize())
-
+    def __raiseTypeError(self,x):
+        if not isinstance(x, int) and not isinstance(x, str) and not isinstance(x, mpmath.mpf):
+            raise TypeError("excpected type: mpmath.mpf,str, or int")
 class Qmap(HilbertSpace):
-    def __init__(self,dim):
+    def __init__(self,dim, domain):
         HilbertSpace.__init__(self, dim)
-        self.scaleinfo = ScaleInfo(dim)
+        self.scaleinfo = ScaleInfo(dim, domain)
         self.stateIn = mpArray(dim)
         self.stateOut = mpArray(dim)
         
@@ -232,19 +389,19 @@ class Qmap(HilbertSpace):
         self.pull()
         
 class Unitary(Qmap):
-    def __init__(self, map, dim, tau=1):
-        Qmap.__init__(self, dim)
+    def __init__(self, map, dim, domain, tau=1):
+        Qmap.__init__(self, dim, domain)
         self.map = map
         if not isinstance(tau, mpmath.mpf) and  not isinstance(tau, int):
             raise TypeError("tau types must be mpmath.mpf or integer")
     
         self.tau = tau
         self.matrix = None
-
+        self.h = self.scaleinfo.h
         
-    def setDomain(self, r):
-        self.scaleinfo.setDomain(r)
-        self.h = self.scaleinfo.getPlanck()
+#    def setDomain(self, domain):
+#        self.scaleinfo.setDomain(domain)
+#        self.h = self.scaleinfo.getPlanck()
         
     def op0(self, x, isShift=False):
         if isShift:
@@ -330,8 +487,8 @@ class Unitary(Qmap):
         return isShift
     
 class SymetricUnitary(Unitary):
-    def __init__(self, map, dim, tau):
-        Unitary.__init__(self, map, dim, tau)
+    def __init__(self, map, dim, domain, tau):
+        Unitary.__init__(self, map, dim, domain, tau)
 
     def op0(self, x, isShift=False):
         if isShift:
@@ -365,7 +522,7 @@ class SymetricUnitary(Unitary):
             queue.put(self.stateOut)
 
 class NonUnitary(Unitary):
-    def __init__(self, map, dim, tau):
+    def __init__(self, map, dim, domain, tau):
         Qmap.__init__(self, dim)
         if not isinstance(tau, mpmath.mpf) and  not isinstance(tau, int) and not isinstance(tau, mpmath.mpc):
             raise TypeError("tau types must be mpmath.mpf or mpmath.mpc or integer")
@@ -531,7 +688,7 @@ class NonUnitary(Unitary):
             queue.put(self.stateOut)
 
 class SymetricNonUnitary(NonUnitary):
-    def __init__(self, map, dim, tau):
+    def __init__(self, map, dim, domain, tau):
         NonUnitary.__init__(self, map, dim, tau)
 
     def op0(self, x, isShift=False):
@@ -581,19 +738,19 @@ class QmapSystem(object):
     def _Setting(self, domain, **kwargs):
         tau = kwargs['tau'] if "tau" in kwargs else 1
         if self.type in [None, 'unitary' ,'u','U'] :
-            self.qmap  = Unitary(self.map, self.dim, tau)
+            self.qmap  = Unitary(self.map, self.dim, domain, tau)
         elif self.type in ["S","symetric","SU"]:
-            self.qmap = SymetricUnitary(self.map, self.dim, tau)
+            self.qmap = SymetricUnitary(self.map, self.dim, domain, tau)
         elif self.type in ['NU','nonunitary','open']:
-            self.qmap = NonUnitary(self.map, self.dim, tau)
+            self.qmap = NonUnitary(self.map, self.dim, domain, tau)
             self.setAbsorber = self.qmap.setAbsorber
         elif self.type in ['SNU', 'symetricnonunitary','snu']:
-            self.qmap = SymetricNonUnitary(self.map, self.dim, tau)
+            self.qmap = SymetricNonUnitary(self.map, self.dim, domain, tau)
             self.setAbsorber = self.qmap.setAbsorber
         else:
             raise TypeError("type Error")
         
-        self.qmap.setDomain(domain)
+        #self.qmap.setDomain(domain)
         self.scaleinfo = self.qmap.scaleinfo
     
     def getState(self):
@@ -684,3 +841,9 @@ class QmapSystem(object):
     def _hasKey(self,*args,**kwargs):
         return [args[i] in kwargs for i in range(len(args))]
     
+def _test():
+    import doctest
+    doctest.testmod()
+
+if __name__ == "__main__":
+    _test()
