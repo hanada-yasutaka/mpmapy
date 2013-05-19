@@ -1,7 +1,74 @@
+# -*- coding: utf-8 -*-
 import numpy
 import mpmath
 import time
 class mpArray(numpy.ndarray):
+    """
+    
+    Description
+    ==========
+    
+    mpmath.mpcをnumpy.ndarrayでラップする為のクラスです
+    
+    Create new numpy.ndarray
+    
+    Parameters
+    ----------
+    
+    input : int or list or array
+        if input is integer, new array filled zeros, 
+        else new array filled input values.
+    dtype : date-type, (optional)
+    
+    
+    Returns
+    -----------
+    
+    our : ndarray
+        An array object satisfying the specified requirements
+    
+    Attributes
+    ----------
+    real : mpArray
+        Real part of the array
+    imag : mpArray
+        Imaginary part of the array
+    
+    See Also
+    ----------
+    
+    numpy.ndarray, numpy.ndarray subclassing <http://docs.scipy.org/doc/numpy/user/basics.subclassing.html>
+    
+    .. note::
+    
+        echo "test"
+    
+    Examples
+    ---------
+    
+>>> import mpmapy
+>>> mpmapy.mpArray(4)
+mpArray([mpc(real='0.0', imag='0.0'), mpc(real='0.0', imag='0.0'),
+       mpc(real='0.0', imag='0.0'), mpc(real='0.0', imag='0.0')], dtype=object)
+>>> mpmapy.mpArray([1,2,3])
+mpArray([1, 2, 3], dtype=object)
+>>> y = mpmapy.mpArray.linspace(0,1,4) + mpmapy.mpArray.linspace(1,2,4)*1.j
+>>> y.real
+mpArray([mpf('0.0'), mpf('0.25'), mpf('0.5'), mpf('0.75')], dtype=object)
+>>> y.imag
+mpArray([mpf('1.0'), mpf('1.25'), mpf('1.5'), mpf('1.75')], dtype=object)
+>>> y.toarray(), y.toarray().dtype
+(array([ 0.00+1.j  ,  0.25+1.25j,  0.50+1.5j ,  0.75+1.75j]), dtype('complex128'))
+
+>>> # todo
+>>> y = mpmapy.mpArray.linspace(0,1,4) + 1.j*mpmapy.mpArray.linspace(1,2,4)
+Traceback (most recent call last):
+    File "<ipython-input-41-e82022cca379>", line 1, in <module>
+    y = mpmapy.mpArray.linspace(0,1,4) + 1.j*mpmapy.mpArray.linspace(1,2,4)
+TypeError: unsupported operand type(s) for *: 'complex' and 'mpArray'
+
+    """
+
     def __new__(cls, input=[], dtype='object'):
         if isinstance(input, int):
             data = [mpmath.mpc('0','0')]*input
@@ -9,20 +76,20 @@ class mpArray(numpy.ndarray):
         else:
             obj = numpy.asarray(input, dtype=dtype).view(cls)
         return obj
+
     def __array_finalize__(self, obj):
         if obj is None: return
     
     @property
     def real(self):
-        #return mpArray([ x.real for x in self])
         return numpy.asarray([x.real for x in self], dtype='object').view(type(self))
     
     @property
     def imag(self):
         return numpy.asarray([x.imag for x in self], dtype='object').view(type(self))
-        #return mpArray([ x.imag for x in self])
     
     def toarray(self):
+    	# to numpy array, dtype is numpy.complex128
         return numpy.array(self.tolist(),dtype=numpy.complex128)
     
     def norm(self):
@@ -142,3 +209,11 @@ class mpMatrix(numpy.ndarray):
             print("load ",self.shape," eigen-value and -vector:" ,t, "sec.")
         return evals, evecs
     
+
+
+def _test():
+    import doctest
+    doctest.testmod()
+
+if __name__ == "__main__":
+    _test()
