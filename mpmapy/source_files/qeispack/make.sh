@@ -16,9 +16,9 @@ if [ `echo $test` == 0 ]; then
 else
     echo "gfortran -W -fPIC -c ${fname}.f90"
     echo "gfortran -W -fPIC -c qeispack.f90"
-    gfortran -W -fPIC -c ${fname}.f90 && \
-    gfortran -W -fPIC -c qeispack.f90 && \
-    gfortran -shared -o wrapper_qeispack.so wrapper_qeispack.o qeispack.o
+    gfortran -W -fPIC -c ${fname}.f90 -lm && \
+    gfortran -W -fPIC -c qeispack.f90 -lm && \
+    gfortran -shared -o wrapper_qeispack.so wrapper_qeispack.o qeispack.o -lm
     echo "gfortran -shared -o wrapper_qeispack.so wrapper_qeispack.o qeispack.o"    
     if [ `echo $?` -ne 0 ]; then
         echo "Error: compile error"

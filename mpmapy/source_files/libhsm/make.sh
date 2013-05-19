@@ -12,8 +12,8 @@ FLAGE="-Wall -fPIC"
 CFILES="wrapper_HusimiRep.c CoherentState.c HusimiRep.c c_complex.c"
 OFILES="wrapper_HusimiRep.o CoherentState.o HusimiRep.o c_complex.o"
 echo "gcc $FLAGE -c $CFILES -I/usr/include/python2.7 -lm"
-gcc $FLAGE -c $CFILES -I/usr/include/python2.7 -I./
-gcc -shared -o libhsm.so ${OFILES}
+gcc $FLAGE -c $CFILES -I/usr/include/python2.7 -I./ -ll
+gcc -shared -o libhsm.so ${OFILES} -lm
 echo "gcc -shared -o libhsm.so ${OFILES} -lm"
 
 

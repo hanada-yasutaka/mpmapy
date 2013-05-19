@@ -1,13 +1,14 @@
 import ctypes
-import os
+#import os
+import sys
 import numpy
 
 
 class qEispack(object):
 	def __init__(self):
-		path = os.environ['PYTHONPATH'].split(":")
-		index = [p.endswith("mpmapy") for p in path].index(True)
-		file_path = path[index] + '/mpmapy/shared/wrapper_qeispack.so'
+		#path = os.environ['PYTHONPATH'].split(":")
+		index = [p.endswith("mpmapy") for p in sys.path].index(True)
+		file_path = sys.path[index] + '/mpmapy/shared/wrapper_qeispack.so'
 		self.module = ctypes.cdll.LoadLibrary(file_path)		
 	
 	def file2call_eig(self, dim, rfname, ifname	):
@@ -35,9 +36,9 @@ class qEispack(object):
 
 class call_hsm_rep(object): 
 	def __init__(self):
-		path = os.environ['PYTHONPATH'].split(":")
-		index = [p.endswith('mpmapy') for p in path].index(True)
-		file_path = path[index] + '/mpmapy/shared/libhsm.so'
+		#path = os.environ['PYTHONPATH'].split(":")
+		index = [p.endswith('mpmapy') for p in sys.path].index(True)
+		file_path = sys.path[index] + '/mpmapy/shared/libhsm.so'
 		self.c_lib = ctypes.cdll.LoadLibrary(file_path)
 		
 	def husimi_rep(self, vec, dim, domain, hsm_range, hsm_grid):
