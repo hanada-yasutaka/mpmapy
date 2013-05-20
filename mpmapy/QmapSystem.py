@@ -427,11 +427,11 @@ class Unitary(Qmap):
                 self.setIn(invec)
             elif isinstance(invec, list) and self.dim==len(invec):
                 self.setIn(mpArray(invec))
-
+        
         qvec = self.operator[0]*self.stateIn
-        pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
+        pvec = mpArray(mpfft.fft(qvec))#, inverse=False, verbose=verbose))
         pvec = self.operator[1]*pvec 
-        self.stateOut = mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
+        self.stateOut = mpArray(mpfft.ifft(pvec))#, inverse=True, verbose=verbose))
         if queue !=None: 
             queue.put(self.stateOut)
     
@@ -441,14 +441,12 @@ class Unitary(Qmap):
         self.op0(self.scaleinfo.x[0], False)
         self.op1(self.scaleinfo.x[1], self._isShift())        
 
-    def setMatrix(self, fft=True, core=2, verbose=False):
+    def setMatrix(self, fft=True, core=2, verbose=False,**kwargs):
         from utility import parallel
+
         self.setOperator(fft)
         matrix = mpMatrix(self.dim)
-        
-
         orth_basis = [mpArray(self.dim) for i in range(self.dim)]
-        
         for i in range(self.dim):
             orth_basis[i][i] = mpmath.mpc("1","0")
 
@@ -507,32 +505,34 @@ class SymetricUnitary(Unitary):
                 self.setIn(mpArray(invec))
 
         qvec = self.operator[0]*self.stateIn
-        pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
+        pvec = mpArray(mpfft.fft(qvec))#, inverse=False, verbose=verbose))
         
         
         pvec = self.operator[1]*pvec #[self.operator[1].data[i]*pvec[i] for i in range(self.dim)]
-        qvec = mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
+        qvec = mpArray(mpfft.ifft(pvec))#, inverse=True, verbose=verbose))
         
         qvec = self.operator[0]*qvec
-        pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
+        pvec = mpArray(mpfft.fft(qvec))#, inverse=False, verbose=verbose))
         
-        self.stateOut = mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
+        self.stateOut = mpArray(mpfft.ifft(pvec))#, inverse=True, verbose=verbose))
         
         if queue !=None: 
             queue.put(self.stateOut)
 
 class NonUnitary(Unitary):
     def __init__(self, map, dim, domain, tau):
-        Qmap.__init__(self, dim)
+        Qmap.__init__(self, dim, domain)
         if not isinstance(tau, mpmath.mpf) and  not isinstance(tau, int) and not isinstance(tau, mpmath.mpc):
             raise TypeError("tau types must be mpmath.mpf or mpmath.mpc or integer")
         
         self.map = map    
         self.tau = tau
-        self.matrix = None        
+        self.matrix = None
+        self.h = self.scaleinfo.h
         self.absorber = [mpArray.ones(dim) for i in range(2)]
         self.__dummy = [True, True,True]
         self.gamma = []
+        
         
     def setAbsorber(self, qp=None, atype=None, region=None, **kwargs):
         start = time.time()
@@ -671,9 +671,9 @@ class NonUnitary(Unitary):
         if self._isShift():
             self.absorber[1] = self.absorber[1].fftshift()
         qvec = self.absorber[0]*self.operator[0]*self.stateIn
-        pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
+        pvec = mpArray(mpfft.fft(qvec))#, inverse=False, verbose=verbose))
         pvec = self.absorber[1]*self.operator[1]*pvec 
-        qvec = self.absorber[0]*mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
+        qvec = self.absorber[0]*mpArray(mpfft.ifft(pvec))#, inverse=True, verbose=verbose))
         self.stateOut = State(self.scaleinfo, qvec)
         if queue !=None: 
             queue.put(self.stateOut)
@@ -711,15 +711,15 @@ class SymetricNonUnitary(NonUnitary):
             self.absorber[1] = self.absorber[1].fftshift()
 
         qvec = self.absorber[0]*self.operator[0]*self.stateIn
-        pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
+        pvec = mpArray(mpfft.fft(qvec))#, inverse=False, verbose=verbose))
         
         pvec = self.absorber[1]*self.operator[1]*pvec
-        qvec = mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
+        qvec = mpArray(mpfft.ifft(pvec))#, inverse=True, verbose=verbose))
         
         qvec = self.absorber[0]*self.operator[0]*qvec
-        pvec = mpArray(mpfft.fft(qvec, inverse=False, verbose=verbose))
+        pvec = mpArray(mpfft.fft(qvec))#, inverse=False, verbose=verbose))
         
-        qvec= self.absorber[0]*mpArray(mpfft.fft(pvec, inverse=True, verbose=verbose))
+        qvec= self.absorber[0]*mpArray(mpfft.ifft(pvec))#, inverse=True, verbose=verbose))
         self.stateOut = State(self.scaleinfo, qvec) 
         if queue !=None: 
             queue.put(self.stateOut)
@@ -757,10 +757,14 @@ class QmapSystem(object):
         return State(self.scaleinfo)
     
     def setMatrix(self, **kwargs):
-        haskey = self._hasKey('fft', 'core', 'verbose','left', 'solver','sort', **kwargs)
+        haskey = self._hasKey('fft', 'core', 'verbose','fftengin','left', 'solver','sort', **kwargs)
         fft = kwargs['fft'] if haskey[0] else True
         core = kwargs['core'] if haskey[1]  else 2
-        verbose = kwargs['verbose'] if haskey[2] else False        
+        verbose = kwargs['verbose'] if haskey[2] else False
+        fftengin=kwargs['fftengin'] if haskey[3] else False
+        if fftengin=='numpy':
+            mpfft.fft = mpfft.numpyfft
+            mpfft.ifft= mpfft.numpyifft
         self.qmap.setMatrix(fft=fft, core=core, verbose=verbose)
         self.matrix = self.qmap.getMatrix()
 
@@ -770,11 +774,11 @@ class QmapSystem(object):
         return self.matrix
 
     def getEigen(self, **kwargs):
-        haskey = self._hasKey('left', 'solver','sort', **kwargs)
+        haskey = self._hasKey('left', 'solver','verbose', **kwargs)
         left = kwargs['left'] if haskey[0] else False
         solver = kwargs['solver'] if haskey[1] else 'qeispack'
         verbose = kwargs['verbose'] if haskey[2] else False                
-        
+            
         if self.matrix == None:
             self.setMatrix(**kwargs)
         if self.evals == None or self.evecs == None:

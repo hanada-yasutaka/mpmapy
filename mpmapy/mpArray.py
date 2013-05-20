@@ -12,6 +12,10 @@ class mpArray(numpy.ndarray):
     
     Create new numpy.ndarray
     
+    
+    .. math:: (a + b)^2 = a^2 + 2ab + b^2
+    
+    
     Parameters
     ----------
     
@@ -92,6 +96,8 @@ TypeError: unsupported operand type(s) for *: 'complex' and 'mpArray'
     	# to numpy array, dtype is numpy.complex128
         return numpy.array(self.tolist(),dtype=numpy.complex128)
     
+    def insert(self, i, x):
+        self[i] = x
     def norm(self):
         return mpmath.fabs(self.inner())
     
@@ -111,6 +117,7 @@ TypeError: unsupported operand type(s) for *: 'complex' and 'mpArray'
     
     def normalize(self):
         return self/mpmath.sqrt(self.norm())
+
     def conj(self):
         return numpy.conj(self)
     
@@ -126,6 +133,28 @@ TypeError: unsupported operand type(s) for *: 'complex' and 'mpArray'
 
         
 class mpMatrix(numpy.ndarray):
+    """
+    Examples
+    ----------
+>>> import mpmapy
+>>> import mpmath
+>>> mpmath.mp.dps=36
+>>> mpmapy.mpMatrix(2)
+mpMatrix([[mpc(real='0.0', imag='0.0'), mpc(real='0.0', imag='0.0')],
+       [mpc(real='0.0', imag='0.0'), mpc(real='0.0', imag='0.0')]], dtype=object)
+>>> mat = mpmapy.mpMatrix([[mpmath.mpc("0","1"), mpmath.pi],[mpmath.pi,mpmath.mpc("0","1")]])
+>>> mat
+mpMatrix([[(0.0 + 1.0j), 3.14159265358979323846264338327950288],
+       [3.14159265358979323846264338327950288, (0.0 + 1.0j)]], dtype=object)
+>>> eval, evec = mat.eigen()
+>>> eval
+mpArray([(3.1415926535897932384626433832795028 + 1.0j),
+       (-3.1415926535897932384626433832795028 + 1.0j)], dtype=object)
+>>> evec
+[mpArray([(0.707106781186547524400844362104848992 + 0.0j),
+       (0.707106781186547524400844362104848992 + 0.0j)], dtype=object), mpArray([(-0.707106781186547524400844362104848992 + 0.0j),
+       (0.707106781186547524400844362104848992 + 0.0j)], dtype=object)]
+    """
     def __new__(cls, input, dtype='object'):
         if isinstance(input, int):
             data  = [[mpmath.mpc("0","0")]*input]*input
@@ -161,16 +190,18 @@ class mpMatrix(numpy.ndarray):
         qeispack.file2call_eig(len(self), rfname, ifname)
         end = time.time()
         t = time.time() -start
-        
-        return self._load_file(verbose)
         if verbose:
-            print("Computation eigen-values and -vectors of size", len(self), "in", t,'sec.')            
+            print("Computation eigen-values and -vectors of size", len(self), "in", t,'sec.')
+        return self._load_file(verbose)
+
 
     def lapack(self,verbose):
         matrix = self.toarray()
 
         evals, evecs = numpy.linalg.eig(matrix)
-        return evals, evecs.transpose()
+        evals = mpArray(evals)
+        evecs = [mpArray(evec) for evec in evecs.transpose()]
+        return evals, evecs 
     def toarray(self):
         return numpy.array(self.tolist(), dtype=numpy.complex128)
     
@@ -209,7 +240,7 @@ class mpMatrix(numpy.ndarray):
             print("load ",self.shape," eigen-value and -vector:" ,t, "sec.")
         return evals, evecs
     
-
+ 
 
 def _test():
     import doctest

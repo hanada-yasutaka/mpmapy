@@ -8,8 +8,12 @@ class qEispack(object):
 	def __init__(self):
 		#path = os.environ['PYTHONPATH'].split(":")
 		index = [p.endswith("mpmapy") for p in sys.path].index(True)
-		file_path = sys.path[index] + '/mpmapy/shared/wrapper_qeispack.so'
-		self.module = ctypes.cdll.LoadLibrary(file_path)		
+		try:
+			file_path = sys.path[index] + '/mpmapy/shared/wrapper_qeispack.so'
+			self.module = ctypes.cdll.LoadLibrary(file_path)
+		except OSError:
+			file_path = sys.path[index] + '/shared/wrapper_qeispack.so'
+			self.module = ctypes.cdll.LoadLibrary(file_path)	
 	
 	def file2call_eig(self, dim, rfname, ifname	):
 		self.module.file2call_eig_.argtypes = [ ctypes.POINTER(ctypes.c_int),\

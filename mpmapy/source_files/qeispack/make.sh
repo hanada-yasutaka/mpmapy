@@ -1,6 +1,8 @@
 #!/bin/bash
 # compile wrapper_qeispack
-
+CC=gfortran
+Flags="-fPIC -c -O1"
+libs="-lm"
 list=(*.o)
 test -e ${list} && rm *.o
 
@@ -14,12 +16,13 @@ if [ `echo $test` == 0 ]; then
     echo "Error: require gfortran 4.7 or later"
     exit 1
 else
-    echo "gfortran -W -fPIC -c ${fname}.f90"
-    echo "gfortran -W -fPIC -c qeispack.f90"
-    gfortran -W -fPIC -c ${fname}.f90 -lm && \
-    gfortran -W -fPIC -c qeispack.f90 -lm && \
-    gfortran -shared -o wrapper_qeispack.so wrapper_qeispack.o qeispack.o -lm
-    echo "gfortran -shared -o wrapper_qeispack.so wrapper_qeispack.o qeispack.o"    
+    echo "$CC $Flag ${fname}.f90 $libs"
+    echo "$CC $Flag qeispack.f90 $libs"
+    echo "$CC -shared -o wrapper_qeispack.so wrapper_qeispack.o qeispack.o -lm"        
+    $CC $Flag ${fname}.f90 $libs && \
+    $CC $Flag qeispack.f90 $libs && \
+    $CC -shared -o wrapper_qeispack.so wrapper_qeispack.o qeispack.o -lm
+    
     if [ `echo $?` -ne 0 ]; then
         echo "Error: compile error"
         exit 1

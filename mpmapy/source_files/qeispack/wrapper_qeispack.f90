@@ -109,7 +109,8 @@ subroutine save_values(dim, evals, fname)
   open(n,file=fname,action='write',status='replace', iostat=io)
   !	write(n, *) '#index, real, imag'
   do i=1,dim
-     write (n, *) real(evals(i)),",", imag(evals(i)), ","
+!     write (n, *) real(evals(i)),",", imag(evals(i)), ","
+      write (n, fmt='(E45.36, a, E45.36,a)') real(evals(i)), "," , imag(evals(i)), ","
   end do
   close(n)
   return 
