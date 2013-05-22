@@ -121,6 +121,14 @@ TypeError: unsupported operand type(s) for *: 'complex' and 'mpArray'
     def conj(self):
         return numpy.conj(self)
     
+    def parity(self):
+        vec = self.tolist()
+        vec.append(self[0])
+        vec1 = mpArray(vec)
+        vec1 = vec1.normalize()#/mpmath.sqrt(vec1.norm())
+        vec2 = mpArray([x for x in vec1[::-1]])
+        return vec1.inner(vec2).real
+
     @classmethod
     def ones(cls, dim):
         return mpArray([mpmath.mpc("1", "0")]*dim)
@@ -191,16 +199,20 @@ mpArray([(3.1415926535897932384626433832795028 + 1.0j),
         end = time.time()
         t = time.time() -start
         if verbose:
-            print("Computation eigen-values and -vectors of size", len(self), "in", t,'sec.')
+            print("(QEISPACK) get eigen-values and -vectors of size", len(self), "in", t,'sec.')
         return self._load_file(verbose)
 
 
     def lapack(self,verbose):
+        start = time.time()        
         matrix = self.toarray()
 
         evals, evecs = numpy.linalg.eig(matrix)
         evals = mpArray(evals)
         evecs = [mpArray(evec) for evec in evecs.transpose()]
+        if verbose:
+            t = time.time() -start
+            print("(LAPACK) get eigen value and eigen vector",len(self), "in",t,'sec.')
         return evals, evecs 
     def toarray(self):
         return numpy.array(self.tolist(), dtype=numpy.complex128)

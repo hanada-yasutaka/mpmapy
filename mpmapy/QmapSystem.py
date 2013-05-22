@@ -186,11 +186,11 @@ Traceback (most recent call last):
 TypeError: unsupported operand type(s) for *: 'complex' and 'State'
     """
     def __new__(cls, scaleinfo, data=None):
-        if data != None and isinstance(data, mpArray):
-            obj = mpArray(data)
-            obj = numpy.asarray(data, dtype='object').view(cls)
-        elif isinstance(scaleinfo, ScaleInfo):
+        if not isinstance(scaleinfo, ScaleInfo): raise TypeError("scaleinfo, instance")
+        if data == None:
             data = [mpmath.mpc('0','0')]*scaleinfo.dim
+            obj = numpy.asarray(data, dtype='object').view(cls)
+        elif isinstance(data, mpArray):
             obj = numpy.asarray(data, dtype='object').view(cls)
         else:
             raise TypeError("usage: scaleinfo, (optional) mpArray")
@@ -210,14 +210,11 @@ TypeError: unsupported operand type(s) for *: 'complex' and 'State'
     
     def prep(self):
         pass
+
+    def tompArray(self):
+        return mpArray(self)
     
-    def parity(self):
-        vec = [x for x in self]
-        vec.append(self[0])
-        arr = mpArray(vec)
-        return arr.inner(arr[::-1]).real 
-    
-    def savetxt(self, title, qp='q', abs2=False, header=None):
+    def savetxt(self, title, qp='q', abs2=True, header=None):
         #todo header numpy.savetxt
         with open(title, 'w') as f:
             [f.write("%s" % a ) for a in self.__annotate()]
@@ -317,7 +314,7 @@ mpArray([mpf('-0.5'), mpf('-0.40000000000000002'),
                 #numpy.savetxt(of, slice_data)
                 of.write("\n") 
 
-    def _cs(self, q_c, p_c, x=None):
+    def coherent(self, q_c, p_c, x=None):
         if not isinstance(q_c, mpmath.mpf) and not isinstance(p_c, mpmath.mpf):
             raise ValueError("q_c, p_c must be mpmath.mpf")
         if x == None:
@@ -337,7 +334,7 @@ mpArray([mpf('-0.5'), mpf('-0.40000000000000002'),
         lqmin, lqmax = qrange[0] - 2*d, qrange[1] + 2*d
         long_q = mpArray.linspace(lqmin, lqmax, 5*self.dim, endpoint=False)
         
-        coh_state = self._cs(q_c, p_c, long_q)
+        coh_state = self.coherent(q_c, p_c, long_q)
 
         vec = mpArray(self.dim) 
         m = len(coh_state)/self.dim
@@ -358,15 +355,17 @@ class Qmap(HilbertSpace):
         
     def setIn(self, state):
         if len(state) != self.dim:
-            if not isinstance(state, mpArray) or not isinstance(state, State):
+            if not isinstance(state, mpArray): #or not isinstance(state, State):
                 raise ValueError("expected State or mpArray or State (dim=%d) instance" % self.dim)
         self.stateIn = state
 
     def getIn(self):
-        return State(self.scaleinfo, self.stateIn)
+        return self.stateIn
+        #return State(self.scaleinfo, self.stateIn)
     
     def getOut(self):
-        return State(self.scaleinfo, self.stateOut)
+        return self.stateOut
+        #return State(self.scaleinfo, self.stateOut)
 
     def swap(self):
         tmp =self.stateIn.copy() #[self.stateIn.data[i] for i in range(self.dim)]
@@ -599,7 +598,7 @@ class NonUnitary(Unitary):
             self.absorber.append(mpArray(self.dim))
             self.absorber[index] = data
 
-            x = State(self.scaleinfo, numpy.ones)  - self.absorber[index]
+            x = State(self.scaleinfo, mpArray.ones(self.dim))  - self.absorber[index]
             x.savetxt("absorber_hole_%d.dat" % (index - 2))            
         
     def box(self, qp, region):
@@ -689,7 +688,7 @@ class NonUnitary(Unitary):
 
 class SymetricNonUnitary(NonUnitary):
     def __init__(self, map, dim, domain, tau):
-        NonUnitary.__init__(self, map, dim, tau)
+        NonUnitary.__init__(self, map, dim, domain, tau)
 
     def op0(self, x, isShift=False):
         if isShift:
@@ -755,6 +754,21 @@ class QmapSystem(object):
     
     def getState(self):
         return State(self.scaleinfo)
+
+    def setInit(self,state):
+        if isinstance(state, State):
+            self.qmap.setIn(state.tompArray())
+        else:
+            self.qmap.setIn(state)
+        
+        self.qmap.setOperator()
+        self.evolv = self.qmap.evol
+    
+    def getStateIn(self):
+        return State(self.scaleinfo, self.qmap.getIn())
+    
+    def getStateOut(self):
+        return State(self.scaleinfo, self.qmap.getIn())        
     
     def setMatrix(self, **kwargs):
         haskey = self._hasKey('fft', 'core', 'verbose','fftengin','left', 'solver','sort', **kwargs)
@@ -765,6 +779,7 @@ class QmapSystem(object):
         if fftengin=='numpy':
             mpfft.fft = mpfft.numpyfft
             mpfft.ifft= mpfft.numpyifft
+        print mpfft.fft
         self.qmap.setMatrix(fft=fft, core=core, verbose=verbose)
         self.matrix = self.qmap.getMatrix()
 

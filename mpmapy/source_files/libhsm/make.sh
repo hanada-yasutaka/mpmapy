@@ -8,7 +8,7 @@ test -e ${list} && rm *.o
 
 #include="/opt/local/Library/Frameworks/Python.framework/Versions/2.7/include/python2.7/"
 
-FLAGE="-Wall -fPIC"
+FLAGE="-Wall -fPIC -02"
 CFILES="wrapper_HusimiRep.c CoherentState.c HusimiRep.c c_complex.c"
 OFILES="wrapper_HusimiRep.o CoherentState.o HusimiRep.o c_complex.o"
 echo "gcc $FLAGE -c $CFILES -I/usr/include/python2.7 -lm"
