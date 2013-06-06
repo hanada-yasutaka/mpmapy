@@ -204,7 +204,10 @@ TypeError: unsupported operand type(s) for *: 'complex' and 'State'
         if obj is None: return
         self.scaleinfo = getattr(obj, 'scaleinfo',None)
         self.dim = getattr(obj, 'dim', None)
-        
+    def set(self,x):
+        if len(x) != self.scaleinfo.dim:
+            raise TypeError("len(x) != dim")
+        return State(self.scaleinfo, data = mpArray(x))
     def qrep(self):
         return self
     
@@ -277,14 +280,16 @@ mpArray([mpf('-0.5'), mpf('-0.40000000000000002'),
     
     def hsmrep(self, col, row, hsm_region=None):
         if hsm_region==None:
-            self._hsm_region = self.scaleinfo.domain
+            self._hsm_region = numpy.array(self.scaleinfo.domain, dtype=numpy.float64)
         else:
             self._hsm_region = hsm_region 
         from utility import ctypes_wrapper
         cw = ctypes_wrapper.call_hsm_rep()
         hsm_imag = cw.husimi_rep(self, self.dim, self.scaleinfo.domain, self._hsm_region, [row,col])
+
         x = numpy.linspace(self._hsm_region[0][0], self._hsm_region[0][1], row)
         y = numpy.linspace(self._hsm_region[1][0], self._hsm_region[1][1], col)
+
         X,Y = numpy.meshgrid(x,y)
         return X,Y,hsm_imag
     
@@ -304,14 +309,16 @@ mpArray([mpf('-0.5'), mpf('-0.40000000000000002'),
         if title==None:
             raise ValueError("title is None")
         X, Y, hsm_imag = self.hsmrep(col,row, hsm_region)
+
         data = numpy.array([X,Y,hsm_imag])
         with open(title, "w") as of:
             [of.write("%s" % a ) for a in self.__annotate()]
             of.write("# VQMIN %f\n# VQMAX %f\n# VPMIN %f\n# VPMAX %f\n" % (self._hsm_region[0][0], self._hsm_region[0][1], self._hsm_region[1][0], self._hsm_region[1][1]))
             of.write("# ROW %d\n# COL %d\n" % (row, col))
             for slice_data in data.transpose():
-                [ of.write("%f %f %.18e\n"  % slice_data[0][i], slice_data[1][i], slice_data[2][i]) for i in range(len(slice_data[0])) ]
-                #numpy.savetxt(of, slice_data)
+                #print [slice_data[0][i] for i in range(len(slice_data[0]))                
+                #[ of.write("%f %f %.18e\n"  % slice_data[0][i], slice_data[1][i], slice_data[2][i]) for i in range(len(slice_data[0])) ]
+                numpy.savetxt(of, slice_data)
                 of.write("\n") 
 
     def coherent(self, q_c, p_c, x=None):
@@ -343,6 +350,11 @@ mpArray([mpf('-0.5'), mpf('-0.40000000000000002'),
         for i in range(m):
             vec += coh_state[i][::1]
         return State(self.scaleinfo, vec.normalize())
+    def expcs(self, q_c,p_c, gamma):
+        cs = self.cs(q_c,p_c)
+        expcs=mpArray([mpmath.exp(-mpmath.mpf("0.5")*gamma*x) for x in cs])
+        return State(self.scaleinfo,expcs)
+    
     def __raiseTypeError(self,x):
         if not isinstance(x, int) and not isinstance(x, str) and not isinstance(x, mpmath.mpf):
             raise TypeError("excpected type: mpmath.mpf,str, or int")
@@ -550,6 +562,11 @@ class NonUnitary(Unitary):
                 self.operate = self.hole_operate
                 self.__dummy[2] = False
             qp = 'cs'
+        elif atype=='expcs':
+            absorber = self.expcs(region, **kwargs)
+            dum = -numpy.abs(absorber) + 1
+            dum.save_hsmrep(100,100,title='absorber_hsm.dat')
+            qp = 'q'
         elif atype == 'exp':
             absorber = self.abfunc(self.exp, qp, region, **kwargs)
         elif atype == 'tanh':
@@ -567,6 +584,7 @@ class NonUnitary(Unitary):
             raise ValueError("souce term fund: absorber > 1.0:")
 
     def addAbsorber(self, qp, data=None, **kwargs):
+        # todo absorber type (mpArray) -> type(State)
         if data != None and qp == 'q':
             if self.__dummy[0]:
                 self.absorber[0] = mpArray(self.dim)
@@ -598,8 +616,8 @@ class NonUnitary(Unitary):
             self.absorber.append(mpArray(self.dim))
             self.absorber[index] = data
 
-            x = State(self.scaleinfo, mpArray.ones(self.dim))  - self.absorber[index]
-            x.savetxt("absorber_hole_%d.dat" % (index - 2))            
+            x = State(self.scaleinfo, mpArray.ones(self.dim)  - self.absorber[index])
+            x.savetxt("absorber_cs_%d.dat" % (index - 2))            
         
     def box(self, qp, region):
         if region == None: raise ValueError("region == None")
@@ -615,9 +633,13 @@ class NonUnitary(Unitary):
         if not "gamma" in kwargs:
             raise ValueError("kwargs, gamma")
         self.gamma.append(kwargs['gamma'])
-
-        return State(self.scaleinfo).cs(region[0], region[1])
-
+        #return State(self.scaleinfo).expcs(region[0], region[1])
+        return State(self.scaleinfo).coherent(region[0], region[1])
+    def expcs(self, region, **kwargs):
+        if not "gamma" in kwargs:
+            raise ValueError("kwargs, gamma")
+        self.gamma.append(kwargs['gamma'])
+        return State(self.scaleinfo).expcs(region[0],region[1],kwargs['gamma'])
     def abfunc(self, func, qp, region, **kwargs):
         if qp == 'q':
             abfunc = func(self.scaleinfo.x[0], region[0], region[1], **kwargs)
@@ -678,11 +700,14 @@ class NonUnitary(Unitary):
             queue.put(self.stateOut)
     
     def hole_operate(self, invec=None, queue=None, verbose=False):
-
-        self._operate(invec, None, False) # = self.operate
-        
+        #print "ダンカンバカヤロー"
+        self._operate(invec, None, False) # = self.operate        
+        sum1 = mpArray(self.dim)
         for i in range(2,len(self.absorber)):
-            self.stateOut -= self.absorber[i]*self.stateOut.dot(self.absorber[i].conj())*self.gamma[i-2]*mpmath.mpf("0.5")
+            sum0 = mpmath.fsum(self.absorber[i].conj()*self.stateOut)
+            sum1 += self.absorber[i]*sum0*mpmath.mpf("0.5")*self.gamma[i-2]
+        
+        self.stateOut = self.stateOut - sum1
         if queue !=None:
             queue.put(self.stateOut)
 
@@ -792,7 +817,8 @@ class QmapSystem(object):
         haskey = self._hasKey('left', 'solver','verbose', **kwargs)
         left = kwargs['left'] if haskey[0] else False
         solver = kwargs['solver'] if haskey[1] else 'qeispack'
-        verbose = kwargs['verbose'] if haskey[2] else False                
+        verbose = kwargs['verbose'] if haskey[2] else False
+        
             
         if self.matrix == None:
             self.setMatrix(**kwargs)
