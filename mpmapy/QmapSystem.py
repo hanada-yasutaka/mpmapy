@@ -584,7 +584,7 @@ class NonUnitary(Unitary):
             raise ValueError("souce term fund: absorber > 1.0:")
 
     def addAbsorber(self, qp, data=None, **kwargs):
-        # todo absorber type (mpArray) -> type(State)
+        # todo? absorber type (mpArray) -> type(Stateoq) ?
         if data != None and qp == 'q':
             if self.__dummy[0]:
                 self.absorber[0] = mpArray(self.dim)
@@ -700,14 +700,13 @@ class NonUnitary(Unitary):
             queue.put(self.stateOut)
     
     def hole_operate(self, invec=None, queue=None, verbose=False):
-        #print "ダンカンバカヤロー"
         self._operate(invec, None, False) # = self.operate        
         sum1 = mpArray(self.dim)
         for i in range(2,len(self.absorber)):
-            sum0 = mpmath.fsum(self.absorber[i].conj()*self.stateOut)
+            sum0 = mpmath.fsum(self.absorber[i].conj()*mpArray(self.stateOut))
             sum1 += self.absorber[i]*sum0*mpmath.mpf("0.5")*self.gamma[i-2]
         
-        self.stateOut = self.stateOut - sum1
+        self.stateOut = self.stateOut - State(self.scaleinfo, sum1)
         if queue !=None:
             queue.put(self.stateOut)
 
