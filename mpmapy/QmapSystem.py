@@ -548,7 +548,7 @@ class NonUnitary(Unitary):
     def setAbsorber(self, qp=None, atype=None, region=None, **kwargs):
         start = time.time()
         qptypes = (None, 'q', 'p')
-        atypes = ('box', 'cs', 'hole','exp', 'tanh','opt')
+        atypes = ('box', 'cs', 'hole','exp', 'tanh','opt', 'state')
 
         if not qp in qptypes:
             raise TypeError("excepted first arg; 'qp' in", qptypes)
@@ -557,6 +557,13 @@ class NonUnitary(Unitary):
             absorber = self.box(qp, region)
         elif atype == 'hole' or atype == 'cs':
             absorber = self.hole(region, **kwargs)
+            if self.__dummy[2]:
+                self._operate = self.operate
+                self.operate = self.hole_operate
+                self.__dummy[2] = False
+            qp = 'cs'
+        elif atype == 'state':
+            absorber= self.hole_state(**kwargs)
             if self.__dummy[2]:
                 self._operate = self.operate
                 self.operate = self.hole_operate
@@ -576,7 +583,7 @@ class NonUnitary(Unitary):
         else:
             absorber = None
             self.absorber = [ mpArray.ones(self.dim) for i in range(2)]
-            print("Worning: absorbert does not set")
+            print("Worning: absorber does not set")
 
         self.addAbsorber(qp=qp, data = absorber, **kwargs)
                 
@@ -635,11 +642,23 @@ class NonUnitary(Unitary):
         self.gamma.append(kwargs['gamma'])
         #return State(self.scaleinfo).expcs(region[0], region[1])
         return State(self.scaleinfo).coherent(region[0], region[1])
+
+    def hole_state(self, **kwargs):
+        state = kwargs['state']
+#        gamma = kwargs['gamma']
+        if not isinstance(state, State): raise TypeError("state instance is requred")
+#        if not "gamma" in kwargs:
+#            raise ValueError("kwargs, gamma")
+    
+        self.gamma.append(kwargs['gamma'])
+        return state.tompArray()
+    
     def expcs(self, region, **kwargs):
         if not "gamma" in kwargs:
             raise ValueError("kwargs, gamma")
         self.gamma.append(kwargs['gamma'])
         return State(self.scaleinfo).expcs(region[0],region[1],kwargs['gamma'])
+
     def abfunc(self, func, qp, region, **kwargs):
         if qp == 'q':
             abfunc = func(self.scaleinfo.x[0], region[0], region[1], **kwargs)
@@ -767,7 +786,7 @@ class QmapSystem(object):
         elif self.type in ['NU','nonunitary','open']:
             self.qmap = NonUnitary(self.map, self.dim, domain, tau)
             self.setAbsorber = self.qmap.setAbsorber
-        elif self.type in ['SNU', 'symetricnonunitary','snu']:
+        elif self.type in ['SNU', 'symetricnonunitary','snu','SN']:
             self.qmap = SymetricNonUnitary(self.map, self.dim, domain, tau)
             self.setAbsorber = self.qmap.setAbsorber
         else:
@@ -779,11 +798,15 @@ class QmapSystem(object):
     def getState(self):
         return State(self.scaleinfo)
 
-    def setInit(self,state):
+    def setInit(self,state, fftengin=None):
         if isinstance(state, State):
             self.qmap.setIn(state.tompArray())
         else:
             self.qmap.setIn(state)
+
+        if fftengin=='numpy':
+            mpfft.fft = mpfft.numpyfft
+            mpfft.ifft= mpfft.numpyifft
         
         self.qmap.setOperator()
         self.evolv = self.qmap.evol
