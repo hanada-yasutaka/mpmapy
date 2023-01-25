@@ -1,5 +1,8 @@
 # mpmapy
 
+Development of this repository has been abandoned.
+
+
 mpmapy is pyhon caluculator quantum chaotic map 
 
 Author: Yasutaka Hanada 
